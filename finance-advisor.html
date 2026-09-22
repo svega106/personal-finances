@@ -1,0 +1,1094 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Personal Finance Advisor</title>
+<style>
+  :root{
+    --bg:#0f1419; --surface:#181f2a; --surface2:#1f2836; --line:#2a3545;
+    --text:#e7edf5; --muted:#8a98ac; --faint:#5c6b80;
+    --accent:#4f8cff; --accent2:#6aa6ff;
+    --need:#ff8c5a; --want:#c084fc; --save:#34d399; --invest:#22d3ee;
+    --good:#34d399; --warn:#fbbf24; --bad:#f87171;
+    --radius:16px; --shadow:0 8px 30px rgba(0,0,0,.35);
+    font-synthesis:none;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:radial-gradient(1200px 600px at 80% -10%, #1b2740 0%, var(--bg) 55%) fixed;
+    color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased; line-height:1.5;
+  }
+  button{font-family:inherit; cursor:pointer}
+  input,select{font-family:inherit}
+  .app{display:flex; min-height:100vh}
+
+  /* Sidebar */
+  .sidebar{
+    width:240px; flex-shrink:0; background:var(--surface); border-right:1px solid var(--line);
+    display:flex; flex-direction:column; padding:22px 16px; position:sticky; top:0; height:100vh;
+  }
+  .brand{display:flex; align-items:center; gap:10px; padding:4px 8px 22px; }
+  .brand .logo{
+    width:34px;height:34px;border-radius:9px;flex-shrink:0;
+    background:linear-gradient(135deg,var(--accent),#34d399);
+    display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff;font-size:18px;
+  }
+  .brand h1{font-size:15px;margin:0;font-weight:700;letter-spacing:.2px}
+  .brand p{font-size:11px;margin:0;color:var(--muted)}
+  .nav{display:flex;flex-direction:column;gap:4px;margin-top:6px}
+  .nav button{
+    display:flex;align-items:center;gap:11px;width:100%;text-align:left;
+    background:transparent;border:0;color:var(--muted);padding:11px 12px;border-radius:10px;
+    font-size:14px;font-weight:600;transition:.15s;
+  }
+  .nav button .ic{width:18px;height:18px;flex-shrink:0;opacity:.85}
+  .nav button:hover{background:var(--surface2);color:var(--text)}
+  .nav button.active{background:linear-gradient(135deg,rgba(79,140,255,.18),rgba(52,211,153,.12));color:var(--text)}
+  .nav button.active .ic{opacity:1}
+  .side-foot{margin-top:auto;padding:12px 10px 4px;border-top:1px solid var(--line);font-size:11px;color:var(--faint)}
+
+  /* Main */
+  .main{flex:1; min-width:0; padding:28px 34px 60px; max-width:1180px; margin:0 auto; width:100%}
+  .topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:24px;flex-wrap:wrap}
+  .topbar h2{margin:0;font-size:23px;font-weight:750;letter-spacing:-.3px}
+  .topbar .sub{color:var(--muted);font-size:13px;margin-top:2px}
+  .month-pick{display:flex;align-items:center;gap:8px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:6px 8px}
+  .month-pick select{background:transparent;border:0;color:var(--text);font-size:14px;font-weight:650;padding:4px;outline:none}
+  .month-pick select option{background:var(--surface2)}
+  .iconbtn{background:var(--surface2);border:1px solid var(--line);color:var(--text);width:34px;height:34px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:16px}
+  .iconbtn:hover{border-color:var(--accent)}
+
+  /* Cards / grid */
+  .grid{display:grid;gap:16px}
+  .g3{grid-template-columns:repeat(3,1fr)}
+  .g2{grid-template-columns:repeat(2,1fr)}
+  .g4{grid-template-columns:repeat(4,1fr)}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:20px}
+  .card h3{margin:0 0 2px;font-size:13px;color:var(--muted);font-weight:650;text-transform:uppercase;letter-spacing:.6px}
+  .stat{font-size:27px;font-weight:780;letter-spacing:-.5px;margin-top:6px}
+  .stat.sm{font-size:21px}
+  .pill{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:650;padding:3px 9px;border-radius:99px}
+  .pill.good{background:rgba(52,211,153,.14);color:var(--good)}
+  .pill.warn{background:rgba(251,191,36,.14);color:var(--warn)}
+  .pill.bad{background:rgba(248,113,113,.14);color:var(--bad)}
+  .muted{color:var(--muted)} .faint{color:var(--faint)}
+  .row-between{display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .section-title{font-size:16px;font-weight:730;margin:30px 0 14px;display:flex;align-items:center;gap:9px}
+
+  /* Health ring */
+  .health{display:flex;align-items:center;gap:22px}
+  .ring{position:relative;width:120px;height:120px;flex-shrink:0}
+  .ring svg{transform:rotate(-90deg)}
+  .ring .score{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
+  .ring .score b{font-size:30px;font-weight:800;line-height:1}
+  .ring .score span{font-size:11px;color:var(--muted)}
+
+  /* Allocation bars */
+  .alloc-bar{height:13px;border-radius:8px;background:var(--surface2);overflow:hidden;display:flex}
+  .alloc-bar i{height:100%;display:block}
+  .legend{display:flex;flex-wrap:wrap;gap:14px;margin-top:14px}
+  .legend div{display:flex;align-items:center;gap:7px;font-size:12.5px}
+  .dot{width:10px;height:10px;border-radius:3px;flex-shrink:0}
+
+  /* Plan form */
+  .plan-grid{display:grid;grid-template-columns:1fr 360px;gap:20px;align-items:start}
+  @media(max-width:1080px){.plan-grid{grid-template-columns:1fr}}
+  .field{margin-bottom:14px}
+  .field label{display:block;font-size:12.5px;color:var(--muted);font-weight:600;margin-bottom:6px}
+  .inp{width:100%;background:var(--surface2);border:1px solid var(--line);border-radius:10px;color:var(--text);padding:11px 12px;font-size:14.5px;outline:none;transition:.15s}
+  .inp:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(79,140,255,.15)}
+  .line-item{display:grid;grid-template-columns:1fr 130px 120px 34px;gap:8px;align-items:center;margin-bottom:8px}
+  .line-item .cat{background:var(--surface2);border:1px solid var(--line);border-radius:9px;color:var(--text);padding:9px;font-size:13px}
+  .line-item input{background:var(--surface2);border:1px solid var(--line);border-radius:9px;color:var(--text);padding:9px 10px;font-size:13.5px;outline:none;width:100%}
+  .line-item input:focus{border-color:var(--accent)}
+  .del{background:transparent;border:1px solid var(--line);color:var(--bad);border-radius:8px;height:36px;font-size:16px}
+  .del:hover{background:rgba(248,113,113,.12)}
+  .addrow{margin-top:6px;background:transparent;border:1px dashed var(--line);color:var(--accent2);padding:9px;border-radius:10px;width:100%;font-weight:650;font-size:13px}
+  .addrow:hover{border-color:var(--accent);background:rgba(79,140,255,.07)}
+  .group{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin-bottom:16px}
+  .group > .row-between{margin-bottom:12px}
+  .group h4{margin:0;font-size:14.5px;font-weight:700;display:flex;align-items:center;gap:8px}
+  .group .total{font-size:13px;color:var(--muted);font-weight:650}
+  .li-head{display:grid;grid-template-columns:1fr 130px 120px 34px;gap:8px;font-size:11px;color:var(--faint);font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin-bottom:7px;padding:0 2px}
+
+  /* Advisor panel (sticky) */
+  .advisor{position:sticky;top:20px}
+  .advisor .card{background:linear-gradient(165deg,var(--surface2),var(--surface))}
+  .kv{display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--line);font-size:14px}
+  .kv:last-of-type{border-bottom:0}
+  .kv b{font-weight:720}
+  .big-remain{font-size:30px;font-weight:800;letter-spacing:-.6px;margin:4px 0 2px}
+  .advice{font-size:13px;color:var(--text);background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:9px;padding:11px 13px;margin-top:10px;display:flex;gap:9px;align-items:flex-start}
+  .advice.good{border-left-color:var(--good)} .advice.warn{border-left-color:var(--warn)} .advice.bad{border-left-color:var(--bad)}
+  .advice .ai{font-size:15px;line-height:1.3}
+
+  /* Goals */
+  .goal-card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px}
+  .goal-card .row-between{margin-bottom:4px}
+  .goal-name{font-weight:730;font-size:15.5px}
+  .prog{height:10px;border-radius:6px;background:var(--surface2);overflow:hidden;margin:12px 0 8px}
+  .prog i{display:block;height:100%;background:linear-gradient(90deg,var(--save),#22d3ee);border-radius:6px;transition:width .4s}
+  .goal-meta{display:flex;justify-content:space-between;font-size:12.5px;color:var(--muted)}
+  .btn{background:var(--accent);border:0;color:#fff;font-weight:680;padding:11px 18px;border-radius:11px;font-size:14px}
+  .btn:hover{background:var(--accent2)}
+  .btn.ghost{background:var(--surface2);border:1px solid var(--line);color:var(--text)}
+  .btn.ghost:hover{border-color:var(--accent)}
+  .btn.sm{padding:8px 13px;font-size:13px;border-radius:9px}
+
+  /* Empty / modal */
+  .empty{text-align:center;padding:50px 20px;color:var(--muted)}
+  .empty .big{font-size:40px;margin-bottom:10px}
+  .modal-bg{position:fixed;inset:0;background:rgba(5,8,13,.66);backdrop-filter:blur(3px);display:none;align-items:center;justify-content:center;z-index:50;padding:20px}
+  .modal-bg.show{display:flex}
+  .modal{background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:24px;width:100%;max-width:440px;box-shadow:var(--shadow)}
+  .modal h3{margin:0 0 16px;font-size:18px}
+  .modal .actions{display:flex;gap:10px;justify-content:flex-end;margin-top:20px}
+  .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--surface2);border:1px solid var(--line);color:var(--text);padding:12px 20px;border-radius:12px;box-shadow:var(--shadow);opacity:0;transition:.3s;z-index:99;font-size:14px;font-weight:600}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  .hidden{display:none!important}
+  .seg{display:inline-flex;background:var(--surface2);border:1px solid var(--line);border-radius:10px;padding:3px}
+  .seg button{background:transparent;border:0;color:var(--muted);padding:7px 13px;border-radius:8px;font-size:13px;font-weight:650}
+  .seg button.on{background:var(--accent);color:#fff}
+  .cashflow-bar{display:flex;flex-direction:column;gap:10px;margin-top:6px}
+  .cf-row{display:grid;grid-template-columns:120px 1fr 110px;align-items:center;gap:12px;font-size:13px}
+  .cf-track{height:22px;background:var(--surface2);border-radius:7px;overflow:hidden;position:relative}
+  .cf-track i{display:block;height:100%;border-radius:7px}
+  .insight{display:flex;gap:11px;align-items:flex-start;padding:13px 0;border-bottom:1px solid var(--line)}
+  .insight:last-child{border-bottom:0}
+  .insight .ic2{width:30px;height:30px;border-radius:9px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:15px}
+  .insight .tx{font-size:13.5px}
+  .insight .tx b{font-weight:720}
+
+  /* Annual review */
+  .ytbl{width:100%;border-collapse:collapse;font-size:13px;margin-top:6px}
+  .ytbl th{text-align:right;font-size:11px;color:var(--faint);font-weight:600;text-transform:uppercase;letter-spacing:.5px;padding:8px 10px;border-bottom:1px solid var(--line)}
+  .ytbl th:first-child{text-align:left}
+  .ytbl td{text-align:right;padding:9px 10px;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums}
+  .ytbl td:first-child{text-align:left;font-weight:650}
+  .ytbl tr.empty-row td{color:var(--faint)}
+  .ytbl tr.total-row td{border-top:2px solid var(--line);border-bottom:0;font-weight:780;padding-top:12px}
+  .ytbl tr:hover:not(.total-row) td{background:rgba(79,140,255,.05)}
+  .pos{color:var(--good)} .neg{color:var(--bad)}
+  .spark{display:flex;align-items:flex-end;gap:5px;height:70px;margin-top:8px}
+  .spark .bar{flex:1;background:var(--surface2);border-radius:4px 4px 0 0;position:relative;min-height:2px;display:flex;align-items:flex-end;justify-content:center}
+  .spark .bar i{display:block;width:100%;border-radius:4px 4px 0 0}
+  .spark .bl{font-size:9px;color:var(--faint);margin-top:4px;text-align:center}
+  .yearnav{display:flex;align-items:center;gap:10px}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="logo">₡</div>
+      <div><h1>Finance Advisor</h1><p>Monthly planning</p></div>
+    </div>
+    <nav class="nav" id="nav">
+      <button data-view="dashboard" class="active"><span class="ic">◎</span> Dashboard</button>
+      <button data-view="plan"><span class="ic">✎</span> Monthly Plan</button>
+      <button data-view="goals"><span class="ic">◈</span> Savings Goals</button>
+      <button data-view="annual"><span class="ic">▤</span> Annual Review</button>
+      <button data-view="settings"><span class="ic">⚙</span> Settings</button>
+    </nav>
+    <div class="side-foot">
+      Your data is stored only on this device.<br>
+      <span id="lastSaved"></span>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="topbar">
+      <div>
+        <h2 id="viewTitle">Financial dashboard</h2>
+        <div class="sub" id="viewSub"></div>
+      </div>
+      <div class="month-pick">
+        <button class="iconbtn" id="prevMonth" title="Previous month">‹</button>
+        <select id="monthSel"></select>
+        <button class="iconbtn" id="nextMonth" title="Next month">›</button>
+      </div>
+    </div>
+    <div id="views"></div>
+  </main>
+</div>
+
+<div class="modal-bg" id="modalBg">
+  <div class="modal" id="modalBox"></div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+/* ---------------- State & persistence ---------------- */
+const LS_KEY = "pfa.state.v1";
+const fmt = new Intl.NumberFormat('en-US',{style:'currency',currency:'CRC',currencyDisplay:'narrowSymbol',maximumFractionDigits:0});
+const money = v => fmt.format(Math.round(v||0));
+const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+const MONTHS_ABBR = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+
+const DEFAULT_ALLOC = { needs:50, wants:30, savings:20 };
+
+let state = load();
+
+function load(){
+  try{
+    const s = JSON.parse(localStorage.getItem(LS_KEY));
+    if(s && s.months) return s;
+  }catch(e){}
+  return { months:{}, goals:[], settings:{ alloc:{...DEFAULT_ALLOC}, name:"" }, lastSaved:null };
+}
+function save(){
+  state.lastSaved = Date.now();
+  localStorage.setItem(LS_KEY, JSON.stringify(state));
+  const el = document.getElementById('lastSaved');
+  if(el) el.textContent = "Saved " + new Date(state.lastSaved).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});
+}
+function uid(){ return Math.random().toString(36).slice(2,9); }
+
+/* current month key like 2026-06 */
+function monthKey(d=new Date()){ return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,'0'); }
+function monthLabel(key){ const [y,m]=key.split('-'); return MONTHS[+m-1]+" "+y; }
+function shiftMonth(key,delta){ const [y,m]=key.split('-').map(Number); const d=new Date(y,m-1+delta,1); return monthKey(d); }
+
+let currentMonth = monthKey();
+let annualYear = +currentMonth.slice(0,4);
+
+function blankMonth(){
+  return {
+    income: 0,
+    extraIncome: [],        // {id,name,amount}
+    bills: [],              // {id,name,amount}  -> essentials (mandatory)
+    recurring: [],          // {id,name,amount,cat:'needs'|'wants'}
+    oneTime: [],            // {id,name,amount,cat}
+    contributions: {},      // goalId -> amount
+    invest: 0,              // explicit investing amount
+    usedCarryover: 0        // accumulated savings pulled in as income this month
+  };
+}
+function getMonth(key){
+  if(!state.months[key]) state.months[key] = blankMonth();
+  return state.months[key];
+}
+
+/* ---------------- Computation engine ---------------- */
+// Planned amounts for a month, independent of any carry-over usage.
+function plannedParts(m){
+  const extra = m.extraIncome.reduce((s,x)=>s+(+x.amount||0),0);
+  const base = (+m.income||0);
+  const billsTotal = m.bills.reduce((s,x)=>s+(+x.amount||0),0);
+  const recNeeds = m.recurring.filter(x=>x.cat==='needs').reduce((s,x)=>s+(+x.amount||0),0);
+  const recWants = m.recurring.filter(x=>x.cat!=='needs').reduce((s,x)=>s+(+x.amount||0),0);
+  const otNeeds = m.oneTime.filter(x=>x.cat==='needs').reduce((s,x)=>s+(+x.amount||0),0);
+  const otWants = m.oneTime.filter(x=>x.cat!=='needs').reduce((s,x)=>s+(+x.amount||0),0);
+  const needs = billsTotal + recNeeds + otNeeds;
+  const wants = recWants + otWants;
+  const goalsTotal = Object.values(m.contributions).reduce((s,v)=>s+(+v||0),0);
+  const invest = (+m.invest||0);
+  const savings = goalsTotal + invest;
+  const planned = needs + wants + savings;
+  return { base, extra, billsTotal, needs, wants, goalsTotal, invest, savings, planned };
+}
+
+/* Net-worth / accumulated-savings ledger.
+   Each month contributes (base+extra − planned) to the pool. Money pulled in via
+   usedCarryover is already in the pool, so it cancels out and never inflates net worth
+   unless it is actually spent. Returns { key:{opening, net, closing} } in chronological order. */
+function carryoverChain(){
+  const keys = Object.keys(state.months).sort();
+  let bal = 0; const map = {};
+  for(const k of keys){
+    const p = plannedParts(state.months[k]);
+    const net = (p.base + p.extra) - p.planned;        // surplus that flows to the pool
+    map[k] = { opening: bal, net, closing: bal + net };
+    bal += net;
+  }
+  return map;
+}
+// Total goal savings, included in "true net worth".
+function goalsSavedTotal(){ return state.goals.reduce((s,g)=>s+(+g.saved||0),0); }
+
+function compute(key){
+  const m = getMonth(key);
+  const a = state.settings.alloc;
+  const p = plannedParts(m);
+
+  const chain = carryoverChain();
+  const carryAvailable = chain[key] ? chain[key].opening : 0;   // pool banked from prior months
+  const used = Math.max(0, Math.min(+m.usedCarryover||0, carryAvailable));
+
+  const earned = p.base + p.extra;                     // money actually earned this month
+  const income = earned + used;                        // spendable income incl. pulled savings
+  const planned = p.planned;
+  const remaining = income - planned;                  // free / unallocated this month
+  const netToPool = earned - planned;                  // what this month adds to the pool
+  const closing = carryAvailable + netToPool;          // pool balance after this month
+  const netWorth = closing + goalsSavedTotal();        // true net worth incl. goals
+
+  const tNeeds = income * a.needs/100;
+  const tWants = income * a.wants/100;
+  const tSavings = income * a.savings/100;
+  const afterNeedsSavings = income - p.needs - p.savings;
+
+  return {
+    m, earned, income, extra:p.extra, billsTotal:p.billsTotal, needs:p.needs, wants:p.wants,
+    savings:p.savings, goalsTotal:p.goalsTotal, invest:p.invest,
+    planned, remaining, afterNeedsSavings,
+    carryAvailable, used, netToPool, closing, netWorth,
+    tNeeds, tWants, tSavings,
+    pNeeds: income? p.needs/income*100:0,
+    pWants: income? p.wants/income*100:0,
+    pSavings: income? p.savings/income*100:0,
+  };
+}
+
+/* Financial health score 0-100 */
+function healthScore(c){
+  if(c.income<=0) return {score:0, label:"No data", cls:"warn"};
+  let s = 0;
+  const sr = c.pSavings;
+  s += Math.min(40, sr/20*40);
+  if(c.remaining>=0) s += 35;
+  else s += Math.max(0, 35 + (c.remaining/c.income)*100);
+  if(c.pNeeds<=50) s+=25;
+  else if(c.pNeeds<=65) s += 25 - (c.pNeeds-50)/15*25;
+  else s += 0;
+  s = Math.max(0,Math.min(100,Math.round(s)));
+  let label,cls;
+  if(s>=80){label="Excellent";cls="good";}
+  else if(s>=60){label="Healthy";cls="good";}
+  else if(s>=40){label="Needs work";cls="warn";}
+  else {label="At risk";cls="bad";}
+  return {score:s,label,cls};
+}
+
+/* Advisor insights */
+function buildAdvice(c){
+  const out = [];
+  const a = state.settings.alloc;
+  if(c.income<=0){ out.push({cls:"warn",icon:"✱",t:"Start by entering your expected income for the month to get recommendations."}); return out; }
+  if(c.remaining<0){
+    out.push({cls:"bad",icon:"▲",t:`Your plan exceeds your income by <b>${money(-c.remaining)}</b>. Trim discretionary spending or adjust your goals.`});
+  } else {
+    out.push({cls:"good",icon:"✓",t:`You have <b>${money(c.remaining)}</b> unassigned. Consider moving it into savings or investments.`});
+  }
+  if(c.pSavings < a.savings){
+    const gap = c.tSavings - c.savings;
+    out.push({cls:"warn",icon:"◈",t:`You're saving <b>${c.pSavings.toFixed(0)}%</b>. The target is ${a.savings}% — set aside <b>${money(gap)}</b> more to "pay yourself first".`});
+  } else {
+    out.push({cls:"good",icon:"◈",t:`You're saving <b>${c.pSavings.toFixed(0)}%</b> of your income. Above the ${a.savings}% target!`});
+  }
+  if(c.pNeeds > 60){
+    out.push({cls:"warn",icon:"⌂",t:`Your essentials are <b>${c.pNeeds.toFixed(0)}%</b> of income (ideal ≤${a.needs}%). Review fixed bills to free up room.`});
+  }
+  if(c.pWants > a.wants+5){
+    out.push({cls:"warn",icon:"☕",t:`Planned discretionary spending (<b>${c.pWants.toFixed(0)}%</b>) is above the recommended ${a.wants}%.`});
+  }
+  if(c.netToPool>0 && c.remaining>=0){
+    out.push({cls:"good",icon:"🏦",t:`This month you'll add <b>${money(c.netToPool)}</b> to your net worth (projected balance ${money(c.closing)}).`});
+  }
+  return out;
+}
+
+/* ---------------- Rendering ---------------- */
+const views = document.getElementById('views');
+let activeView = 'dashboard';
+
+function updateHeader(){
+  const titles = {
+    dashboard:["Financial dashboard","Your financial health at a glance"],
+    plan:["Monthly Plan — "+monthLabel(currentMonth),"Enter income and expenses; get your recommended budget"],
+    goals:["Savings Goals","Track progress toward your objectives"],
+    annual:["Annual Review — "+annualYear,"Each month's highlights, year-to-date totals and trends"],
+    settings:["Settings","Customize your budgeting strategy"]
+  };
+  document.getElementById('viewTitle').textContent = titles[activeView][0];
+  document.getElementById('viewSub').textContent = titles[activeView][1];
+}
+
+function setView(v){
+  activeView = v;
+  if(v==='annual') annualYear = +currentMonth.slice(0,4);
+  document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('active',b.dataset.view===v));
+  render();
+}
+
+function render(){
+  updateHeader();
+  if(activeView==='dashboard') renderDashboard();
+  else if(activeView==='plan') renderPlan();
+  else if(activeView==='goals') renderGoals();
+  else if(activeView==='annual') renderAnnual();
+  else if(activeView==='settings') renderSettings();
+  renderMonthSelector();
+}
+
+function renderMonthSelector(){
+  const sel = document.getElementById('monthSel');
+  const keys = new Set(Object.keys(state.months));
+  for(let i=-3;i<=6;i++) keys.add(shiftMonth(monthKey(),i));
+  keys.add(currentMonth);
+  const sorted = [...keys].sort();
+  sel.innerHTML = sorted.map(k=>`<option value="${k}" ${k===currentMonth?'selected':''}>${monthLabel(k)}</option>`).join('');
+}
+
+/* ---- Dashboard ---- */
+function renderDashboard(){
+  const c = compute(currentMonth);
+  const h = healthScore(c);
+  const adv = buildAdvice(c);
+  const a = state.settings.alloc;
+
+  const segs = [
+    {k:'Essentials',v:c.needs,col:'var(--need)'},
+    {k:'Discretionary',v:c.wants,col:'var(--want)'},
+    {k:'Savings',v:c.goalsTotal,col:'var(--save)'},
+    {k:'Investing',v:c.invest,col:'var(--invest)'},
+  ];
+  const denom = Math.max(c.income, c.planned, 1);
+  const barHtml = segs.map(s=>`<i style="width:${(s.v/denom*100)}%;background:${s.col}"></i>`).join('')
+    + (c.remaining>0?`<i style="width:${(c.remaining/denom*100)}%;background:var(--surface2)"></i>`:'');
+  const legend = segs.map(s=>`<div><span class="dot" style="background:${s.col}"></span>${s.k} <b style="margin-left:4px">${money(s.v)}</b></div>`).join('')
+    + (c.remaining>0?`<div><span class="dot" style="background:var(--surface2)"></span>Unassigned <b style="margin-left:4px">${money(c.remaining)}</b></div>`:'');
+
+  const ringCirc = 2*Math.PI*52;
+  const ringOff = ringCirc*(1-h.score/100);
+  const ringColor = h.cls==='good'?'var(--good)':h.cls==='warn'?'var(--warn)':'var(--bad)';
+
+  function cfRow(name,val,target,col){
+    const max=Math.max(val,target,1);
+    return `<div class="cf-row">
+      <div>${name}</div>
+      <div class="cf-track"><i style="width:${val/max*100}%;background:${col}"></i></div>
+      <div style="text-align:right">${money(val)} <span class="faint" style="font-size:11px">/ ${money(target)}</span></div>
+    </div>`;
+  }
+
+  const goalsHtml = state.goals.length? state.goals.map(g=>{
+    const pct = g.target>0?Math.min(100,g.saved/g.target*100):0;
+    return `<div style="margin-bottom:14px">
+      <div class="row-between"><span style="font-weight:650;font-size:13.5px">${esc(g.name)}</span><span class="muted" style="font-size:12.5px">${pct.toFixed(0)}%</span></div>
+      <div class="prog"><i style="width:${pct}%"></i></div>
+      <div class="goal-meta"><span>${money(g.saved)}</span><span>of ${money(g.target)}</span></div>
+    </div>`;
+  }).join('') : `<div class="muted" style="font-size:13px">No goals yet. <a href="#" onclick="setView('goals');return false" style="color:var(--accent2)">Create one →</a></div>`;
+
+  views.innerHTML = `
+    <div class="grid g4" style="margin-bottom:4px">
+      ${statCard("Income this month", money(c.income), c.used>0?`incl. ${money(c.used)} from savings`:"expected income")}
+      ${statCard("Planned spending", money(c.planned), `essentials ${money(c.needs)}`)}
+      ${statCard("Savings + investing", money(c.savings), `${c.pSavings.toFixed(0)}% of income`, c.pSavings>=a.savings?'good':'warn')}
+      ${statCard("Available", money(c.remaining), c.remaining>=0?"unassigned":"over budget", c.remaining>=0?'good':'bad')}
+    </div>
+
+    <div class="grid g2" style="margin-top:16px">
+      <div class="card">
+        <h3>Financial health</h3>
+        <div class="health" style="margin-top:14px">
+          <div class="ring">
+            <svg width="120" height="120">
+              <circle cx="60" cy="60" r="52" fill="none" stroke="var(--surface2)" stroke-width="11"/>
+              <circle cx="60" cy="60" r="52" fill="none" stroke="${ringColor}" stroke-width="11" stroke-linecap="round"
+                stroke-dasharray="${ringCirc}" stroke-dashoffset="${ringOff}"/>
+            </svg>
+            <div class="score"><b>${h.score}</b><span>of 100</span></div>
+          </div>
+          <div>
+            <span class="pill ${h.cls}">${h.label}</span>
+            <p class="muted" style="font-size:13px;margin:10px 0 0;max-width:230px">
+              Based on your savings rate, how well essentials are controlled, and whether you live within your income.
+            </p>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Income allocation</h3>
+        <div class="alloc-bar" style="margin-top:16px">${barHtml}</div>
+        <div class="legend">${legend}</div>
+      </div>
+    </div>
+
+    <div class="grid g2" style="margin-top:16px">
+      <div class="card">
+        <h3>Cash flow vs. 50/30/20 target</h3>
+        <div class="cashflow-bar" style="margin-top:14px">
+          ${cfRow("Essentials",c.needs,c.tNeeds,'var(--need)')}
+          ${cfRow("Discretionary",c.wants,c.tWants,'var(--want)')}
+          ${cfRow("Savings/Inv.",c.savings,c.tSavings,'var(--save)')}
+        </div>
+      </div>
+      <div class="card">
+        <h3>Goal progress</h3>
+        <div style="margin-top:14px">${goalsHtml}</div>
+      </div>
+    </div>
+
+    <div class="grid g2" style="margin-top:16px">
+      <div class="card" style="background:linear-gradient(165deg,rgba(52,211,153,.10),var(--surface))">
+        <div class="row-between"><h3>Accumulated net worth</h3><span class="pill ${c.netToPool>=0?'good':'bad'}">${c.netToPool>=0?'+':''}${money(c.netToPool)} this month</span></div>
+        <div class="stat" style="margin-top:8px;color:var(--save)">${money(c.closing)}</div>
+        <div class="muted" style="font-size:12px;margin-top:2px">Available savings after this month (unspent money, preserved)</div>
+        <div style="margin-top:14px">
+          <div class="kv"><span>Available at start of month</span><b>${money(c.carryAvailable)}</b></div>
+          <div class="kv"><span>Used as income this month</span><b>${money(c.used)}</b></div>
+          <div class="kv"><span>Added to net worth this month</span><b style="color:${c.netToPool>=0?'var(--good)':'var(--bad)'}">${c.netToPool>=0?'+':''}${money(c.netToPool)}</b></div>
+          <div class="kv"><span>Projected end-of-month balance</span><b>${money(c.closing)}</b></div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Total net worth</h3>
+        <div class="stat" style="margin-top:8px">${money(c.netWorth)}</div>
+        <div class="muted" style="font-size:12px;margin-top:2px">Accumulated savings + balance in your goals</div>
+        <div style="margin-top:14px">
+          <div class="kv"><span><span class="dot" style="background:var(--save);display:inline-block;margin-right:7px"></span>Available savings</span><b>${money(c.closing)}</b></div>
+          <div class="kv"><span><span class="dot" style="background:var(--invest);display:inline-block;margin-right:7px"></span>Saved in goals</span><b>${money(goalsSavedTotal())}</b></div>
+        </div>
+        <div class="muted" style="font-size:12px;margin-top:12px">Unspent money isn't lost between months: it accumulates here and you can use it whenever you need it.</div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:16px">
+      <h3>Advisor tips</h3>
+      <div style="margin-top:8px">
+        ${adv.map(x=>`<div class="insight">
+          <div class="ic2" style="background:${x.cls==='good'?'rgba(52,211,153,.15)':x.cls==='bad'?'rgba(248,113,113,.15)':'rgba(251,191,36,.15)'};color:${x.cls==='good'?'var(--good)':x.cls==='bad'?'var(--bad)':'var(--warn)'}">${x.icon}</div>
+          <div class="tx">${x.t}</div>
+        </div>`).join('')}
+      </div>
+    </div>
+    ${c.income<=0?`<div style="text-align:center;margin-top:18px"><button class="btn" onclick="setView('plan')">Start planning this month →</button></div>`:''}
+  `;
+}
+
+function statCard(label,val,sub,cls){
+  return `<div class="card">
+    <h3>${label}</h3>
+    <div class="stat">${val}</div>
+    <div class="muted" style="font-size:12px;margin-top:3px">${cls?`<span class="pill ${cls}" style="font-size:11px">${sub}</span>`:sub}</div>
+  </div>`;
+}
+
+/* ---- Plan ---- */
+function renderPlan(){
+  const m = getMonth(currentMonth);
+  const c = compute(currentMonth);
+  const a = state.settings.alloc;
+
+  function itemRows(arr,kind,withCat){
+    const head = `<div class="li-head"><span>Item</span><span>Amount</span>${withCat?'<span>Type</span>':'<span></span>'}<span></span></div>`;
+    const rows = arr.map((it,i)=>`
+      <div class="line-item">
+        <input value="${esc(it.name||'')}" placeholder="Name" oninput="updItem('${kind}',${i},'name',this.value)">
+        <input type="number" inputmode="numeric" value="${it.amount||''}" placeholder="0" oninput="updItem('${kind}',${i},'amount',this.value)">
+        ${withCat?`<select class="cat" onchange="updItem('${kind}',${i},'cat',this.value)">
+          <option value="needs" ${it.cat==='needs'?'selected':''}>Essential</option>
+          <option value="wants" ${it.cat!=='needs'?'selected':''}>Discretionary</option>
+        </select>`:'<span></span>'}
+        <button class="del" onclick="delItem('${kind}',${i})" title="Remove">×</button>
+      </div>`).join('');
+    return head + (rows||`<div class="muted" style="font-size:12.5px;padding:4px 2px">Nothing yet.</div>`);
+  }
+
+  const goalRows = state.goals.length ? state.goals.map(g=>{
+    const v = m.contributions[g.id]||'';
+    const suggested = g.monthly||0;
+    return `<div class="line-item" style="grid-template-columns:1fr 130px 120px 34px">
+      <div style="font-size:13.5px;font-weight:600;display:flex;align-items:center;gap:8px"><span class="dot" style="background:var(--save)"></span>${esc(g.name)}</div>
+      <input type="number" inputmode="numeric" value="${v}" placeholder="0" oninput="updContribution('${g.id}',this.value)">
+      <button class="btn ghost sm" style="grid-column:span 1" onclick="updContribution('${g.id}',${suggested});render()" title="Suggested contribution">${suggested?money(suggested):'—'}</button>
+      <span></span>
+    </div>`;
+  }).join('') : `<div class="muted" style="font-size:12.5px">No goals yet. Create them on the Goals tab.</div>`;
+
+  views.innerHTML = `
+  <div class="plan-grid">
+    <div>
+      <div class="group">
+        <div class="row-between"><h4>💵 Expected income</h4></div>
+        <div class="field">
+          <label>Primary income this month (net salary)</label>
+          <input class="inp" type="number" inputmode="numeric" value="${m.income||''}" placeholder="0" oninput="updIncome(this.value)">
+        </div>
+        <div class="row-between"><span class="total">Anticipated additional income</span><span class="total">${money(c.extra)}</span></div>
+        <div style="margin-top:8px">${itemRows(m.extraIncome,'extraIncome',false)}</div>
+        <button class="addrow" onclick="addItem('extraIncome')">+ Add extra income</button>
+      </div>
+
+      <div class="group" style="border-color:rgba(52,211,153,.35)">
+        <div class="row-between"><h4>🏦 Accumulated savings (net worth)</h4><span class="total">available ${money(c.carryAvailable)}</span></div>
+        <div class="muted" style="font-size:12px;margin-bottom:12px">Money you've accumulated in previous months by spending less than you earn. You can use some of it as extra income this month; whatever you don't use keeps growing.</div>
+        ${c.carryAvailable>0 ? `
+        <div class="field" style="margin-bottom:8px">
+          <label>Use this month as additional income</label>
+          <input class="inp" type="number" inputmode="numeric" value="${m.usedCarryover||''}" placeholder="0" max="${c.carryAvailable}" oninput="updCarryover(this.value)">
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn ghost sm" style="flex:1" onclick="useCarryover(0)">None</button>
+          <button class="btn ghost sm" style="flex:1" onclick="useCarryover(${Math.round(c.carryAvailable/2)})">Half</button>
+          <button class="btn ghost sm" style="flex:1" onclick="useCarryover(${Math.round(c.carryAvailable)})">All</button>
+        </div>
+        <div class="muted" style="font-size:12px;margin-top:10px" id="usedNote">Using <b style="color:var(--text)">${money(c.used)}</b> of your accumulated savings.</div>
+        ` : `<div class="muted" style="font-size:12.5px">You don't have accumulated savings yet. Finish a month with a surplus and it will appear here.</div>`}
+        <div class="muted" style="font-size:12px;margin-top:10px" id="surplusNote">This month's surplus (<b style="color:var(--text)">${money(Math.max(0,c.netToPool))}</b>) will automatically be added to your accumulated savings.</div>
+      </div>
+
+      <div class="group">
+        <div class="row-between"><h4>🏠 Mandatory fixed bills</h4><span class="total">${money(c.billsTotal)}</span></div>
+        <div class="muted" style="font-size:12px;margin-bottom:10px">Rent, utilities, loans, insurance — essentials.</div>
+        ${itemRows(m.bills,'bills',false)}
+        <button class="addrow" onclick="addItem('bills')">+ Add bill</button>
+      </div>
+
+      <div class="group">
+        <div class="row-between"><h4>🔁 Recurring expenses</h4></div>
+        <div class="muted" style="font-size:12px;margin-bottom:10px">Subscriptions, transport, food — mark whether each is essential or discretionary.</div>
+        ${itemRows(m.recurring,'recurring',true)}
+        <button class="addrow" onclick="addItem('recurring')">+ Add recurring</button>
+      </div>
+
+      <div class="group">
+        <div class="row-between"><h4>📌 One-time expenses this month</h4></div>
+        <div class="muted" style="font-size:12px;margin-bottom:10px">One-off expenses expected for this month.</div>
+        ${itemRows(m.oneTime,'oneTime',true)}
+        <button class="addrow" onclick="addItem('oneTime')">+ Add one-time</button>
+      </div>
+
+      <div class="group">
+        <div class="row-between"><h4>◈ Savings to goals</h4><span class="total">${money(c.goalsTotal)}</span></div>
+        <div class="li-head"><span>Goal</span><span>Contribution</span><span>Suggested</span><span></span></div>
+        ${goalRows}
+      </div>
+
+      <div class="group">
+        <div class="row-between"><h4>📈 Investing</h4></div>
+        <div class="field" style="margin:0">
+          <label>Amount to invest this month (fund, stocks, voluntary pension…)</label>
+          <input class="inp" type="number" inputmode="numeric" value="${m.invest||''}" placeholder="0" oninput="updInvest(this.value)">
+        </div>
+      </div>
+    </div>
+
+    <div class="advisor">
+      <div class="card">
+        <h3>Recommended budget</h3>
+        <div class="muted" style="font-size:12px;margin:2px 0 12px">50/30/20 strategy · pay yourself first</div>
+        <div class="kv"><span>Total income</span><b>${money(c.income)}</b></div>
+        ${recoLine("Essentials",a.needs,c.tNeeds,c.needs)}
+        ${recoLine("Discretionary",a.wants,c.tWants,c.wants)}
+        ${recoLine("Savings+Inv.",a.savings,c.tSavings,c.savings)}
+        <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)">
+          <div class="muted" style="font-size:12px">Unassigned available</div>
+          <div class="big-remain" style="color:${c.remaining<0?'var(--bad)':c.remaining>0?'var(--good)':'var(--text)'}">${money(c.remaining)}</div>
+          <div class="muted" style="font-size:12px">After essentials + savings you have <b style="color:var(--text)">${money(c.afterNeedsSavings)}</b> to spend freely.</div>
+        </div>
+        ${buildAdvice(c).slice(0,3).map(x=>`<div class="advice ${x.cls}"><span class="ai">${x.icon}</span><span>${x.t}</span></div>`).join('')}
+      </div>
+      <div style="display:flex;gap:8px;margin-top:12px">
+        <button class="btn ghost sm" style="flex:1" onclick="copyMonth()">copy previous month</button>
+        <button class="btn ghost sm" style="flex:1" onclick="clearMonth()">clear month</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function recoLine(name,pct,target,actual){
+  let cls;
+  if(name==='Savings+Inv.') cls = actual>=target?'good':'warn';
+  else cls = actual<=target*1.05?'good':'warn';
+  return `<div class="kv">
+    <span>${name} <span class="faint" style="font-size:11px">${pct}%</span></span>
+    <span style="text-align:right">
+      <b>${money(actual)}</b>
+      <span class="pill ${cls}" style="margin-left:6px;font-size:10.5px">target ${money(target)}</span>
+    </span>
+  </div>`;
+}
+
+/* ---- Goals ---- */
+function renderGoals(){
+  const list = state.goals.length ? `<div class="grid g2">${state.goals.map(goalCard).join('')}</div>`
+    : `<div class="empty"><div class="big">◈</div><p>You don't have any savings goals yet.<br>Create your first one to start building wealth.</p></div>`;
+  views.innerHTML = `
+    <div class="row-between" style="margin-bottom:16px">
+      <div class="muted" style="font-size:13.5px">Define objectives (emergency fund, trip, year-end bonus savings…) and let the advisor suggest how much to contribute each month.</div>
+      <button class="btn" onclick="goalModal()">+ New goal</button>
+    </div>
+    ${list}`;
+}
+function goalCard(g){
+  const pct = g.target>0?Math.min(100,g.saved/g.target*100):0;
+  const remain = Math.max(0,g.target-g.saved);
+  const monthsLeft = g.monthly>0?Math.ceil(remain/g.monthly):null;
+  return `<div class="goal-card">
+    <div class="row-between">
+      <span class="goal-name">${esc(g.name)}</span>
+      <span class="pill ${pct>=100?'good':'warn'}">${pct.toFixed(0)}%</span>
+    </div>
+    ${g.deadline?`<div class="muted" style="font-size:12px">Target date: ${esc(g.deadline)}</div>`:''}
+    <div class="prog"><i style="width:${pct}%"></i></div>
+    <div class="goal-meta"><span><b style="color:var(--text)">${money(g.saved)}</b> saved</span><span>target ${money(g.target)}</span></div>
+    <div class="muted" style="font-size:12.5px;margin-top:10px">
+      ${g.monthly>0?`Suggested monthly contribution: <b style="color:var(--text)">${money(g.monthly)}</b>${monthsLeft!==null?` · ~${monthsLeft} months left`:''}`:'No monthly contribution set'}
+    </div>
+    <div style="display:flex;gap:8px;margin-top:14px">
+      <button class="btn ghost sm" onclick="addToGoal('${g.id}')">+ Log savings</button>
+      <button class="btn ghost sm" onclick="goalModal('${g.id}')">Edit</button>
+      <button class="btn ghost sm" style="color:var(--bad)" onclick="delGoal('${g.id}')">Delete</button>
+    </div>
+  </div>`;
+}
+
+/* ---- Annual Review ---- */
+function renderAnnual(){
+  const year = annualYear;
+  const rows = [];
+  const tot = {earned:0,needs:0,wants:0,savings:0,net:0,monthsPlanned:0,srSum:0,srCount:0};
+  let bestNet=null, worstNet=null;
+  const netSeries = [];
+
+  for(let mo=1;mo<=12;mo++){
+    const key = year+"-"+String(mo).padStart(2,'0');
+    const exists = !!state.months[key];
+    if(exists){
+      const c = compute(key);
+      const planned = c.earned>0 || c.planned>0 || c.used>0;
+      rows.push({mo,key,exists:true,c,planned});
+      if(c.income>0 || c.planned>0){
+        tot.earned += c.earned; tot.needs += c.needs; tot.wants += c.wants;
+        tot.savings += c.savings; tot.net += c.netToPool; tot.monthsPlanned++;
+        if(c.income>0){ tot.srSum += c.pSavings; tot.srCount++; }
+        if(bestNet===null || c.netToPool>bestNet.v) bestNet={mo,v:c.netToPool};
+        if(worstNet===null || c.netToPool<worstNet.v) worstNet={mo,v:c.netToPool};
+      }
+      netSeries.push({mo,v:c.netToPool,active:true});
+    } else {
+      rows.push({mo,key,exists:false});
+      netSeries.push({mo,v:0,active:false});
+    }
+  }
+
+  // Net worth as of end of this year (pool closing of last planned month <= Dec of year)
+  const chain = carryoverChain();
+  let poolEndOfYear = 0;
+  const yearKeys = Object.keys(chain).filter(k=>+k.slice(0,4)<=year).sort();
+  if(yearKeys.length) poolEndOfYear = chain[yearKeys[yearKeys.length-1]].closing;
+  const netWorthNow = (yearKeys.length?chain[Object.keys(chain).sort().pop()].closing:0) + goalsSavedTotal();
+  const avgSR = tot.srCount? tot.srSum/tot.srCount : 0;
+
+  // table
+  const body = rows.map(r=>{
+    if(!r.exists){
+      return `<tr class="empty-row"><td>${MONTHS_ABBR[r.mo-1]}</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>`;
+    }
+    const c=r.c;
+    const netCls = c.netToPool>=0?'pos':'neg';
+    const sr = c.income>0?c.pSavings.toFixed(0)+'%':'—';
+    return `<tr style="cursor:pointer" onclick="gotoMonth('${r.key}')">
+      <td>${MONTHS_ABBR[r.mo-1]}</td>
+      <td>${money(c.earned)}</td>
+      <td>${money(c.needs)}</td>
+      <td>${money(c.wants)}</td>
+      <td>${money(c.savings)}</td>
+      <td class="${netCls}">${c.netToPool>=0?'+':''}${money(c.netToPool)}</td>
+      <td>${money(c.closing)}</td>
+    </tr>`;
+  }).join('');
+
+  const totalRow = `<tr class="total-row">
+    <td>YTD total</td>
+    <td>${money(tot.earned)}</td>
+    <td>${money(tot.needs)}</td>
+    <td>${money(tot.wants)}</td>
+    <td>${money(tot.savings)}</td>
+    <td class="${tot.net>=0?'pos':'neg'}">${tot.net>=0?'+':''}${money(tot.net)}</td>
+    <td>${money(poolEndOfYear)}</td>
+  </tr>`;
+
+  // sparkline of monthly net contribution
+  const maxAbs = Math.max(1, ...netSeries.map(s=>Math.abs(s.v)));
+  const spark = netSeries.map(s=>{
+    const hgt = Math.max(2, Math.abs(s.v)/maxAbs*54);
+    const col = !s.active? 'var(--surface2)' : s.v>=0?'var(--save)':'var(--bad)';
+    return `<div class="bar" title="${MONTHS_ABBR[s.mo-1]}: ${money(s.v)}"><i style="height:${hgt}px;background:${col}"></i></div>`;
+  }).join('');
+  const sparkLabels = netSeries.map(s=>`<div class="bl">${MONTHS_ABBR[s.mo-1][0]}</div>`).join('');
+
+  const hasData = tot.monthsPlanned>0;
+
+  views.innerHTML = `
+    <div class="row-between" style="margin-bottom:18px">
+      <div class="yearnav">
+        <button class="iconbtn" onclick="stepYear(-1)" title="Previous year">‹</button>
+        <span style="font-size:18px;font-weight:750;min-width:64px;text-align:center">${year}</span>
+        <button class="iconbtn" onclick="stepYear(1)" title="Next year">›</button>
+      </div>
+      <div class="muted" style="font-size:13px">${tot.monthsPlanned} of 12 months planned</div>
+    </div>
+
+    ${!hasData ? `<div class="empty"><div class="big">▤</div><p>No months planned for ${year} yet.<br>Plan a month and it will show up in this review.</p></div>` : `
+
+    <div class="grid g4" style="margin-bottom:4px">
+      ${statCard("Total earned (YTD)", money(tot.earned), `${tot.monthsPlanned} month${tot.monthsPlanned>1?'s':''} planned`)}
+      ${statCard("Total saved + invested", money(tot.savings), "into goals & investments")}
+      ${statCard("Added to net worth", money(tot.net), tot.net>=0?"surplus kept":"net deficit", tot.net>=0?'good':'bad')}
+      ${statCard("Avg. savings rate", avgSR.toFixed(0)+"%", avgSR>=state.settings.alloc.savings?"at/above target":"below target", avgSR>=state.settings.alloc.savings?'good':'warn')}
+    </div>
+
+    <div class="grid g2" style="margin-top:16px">
+      <div class="card" style="background:linear-gradient(165deg,rgba(52,211,153,.10),var(--surface))">
+        <h3>Net worth to date</h3>
+        <div class="stat" style="margin-top:8px;color:var(--save)">${money(netWorthNow)}</div>
+        <div class="muted" style="font-size:12px;margin-top:2px">Accumulated savings + goal balances, across all months</div>
+        <div style="margin-top:14px">
+          <div class="kv"><span>Available savings pool (end of ${year})</span><b>${money(poolEndOfYear)}</b></div>
+          <div class="kv"><span>Saved in goals</span><b>${money(goalsSavedTotal())}</b></div>
+          <div class="kv"><span>Best month</span><b>${bestNet?MONTHS_ABBR[bestNet.mo-1]+' · '+money(bestNet.v):'—'}</b></div>
+          <div class="kv"><span>Weakest month</span><b>${worstNet?MONTHS_ABBR[worstNet.mo-1]+' · '+money(worstNet.v):'—'}</b></div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Monthly contribution to net worth</h3>
+        <div class="spark">${spark}</div>
+        <div style="display:flex;gap:5px">${sparkLabels.replace(/class="bl"/g,'class="bl" style="flex:1"')}</div>
+        <div class="muted" style="font-size:12px;margin-top:10px">Green bars are months you finished with a surplus; red bars are months you spent more than you earned.</div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:16px">
+      <h3>Month-by-month breakdown</h3>
+      <div style="overflow-x:auto">
+      <table class="ytbl">
+        <thead><tr>
+          <th>Month</th><th>Earned</th><th>Essentials</th><th>Discretionary</th><th>Saved/Inv.</th><th>To net worth</th><th>Pool balance</th>
+        </tr></thead>
+        <tbody>${body}${totalRow}</tbody>
+      </table>
+      </div>
+      <div class="muted" style="font-size:12px;margin-top:10px">Click any planned month to jump to its plan. "Earned" excludes savings pulled from prior months, so it reflects real income.</div>
+    </div>
+    `}
+  `;
+}
+
+/* ---- Settings ---- */
+function renderSettings(){
+  const a = state.settings.alloc;
+  const sum = a.needs+a.wants+a.savings;
+  views.innerHTML = `
+  <div class="grid g2">
+    <div class="card">
+      <h3>Allocation strategy</h3>
+      <p class="muted" style="font-size:13px;margin:8px 0 16px">Adjust the target percentages. The base model is 50/30/20: essentials, discretionary, savings.</p>
+      ${allocSlider('needs','Essentials (needs)',a.needs,'var(--need)')}
+      ${allocSlider('wants','Discretionary (wants)',a.wants,'var(--want)')}
+      ${allocSlider('savings','Savings + investing',a.savings,'var(--save)')}
+      <div class="kv" style="margin-top:8px"><span>Total</span><b id="allocSum" style="color:${sum===100?'var(--good)':'var(--warn)'}">${sum}%</b></div>
+      <div id="allocHint" class="muted" style="font-size:12px;margin-top:4px">${sum===100?'Balanced to 100%.':'The ideal total is 100%. Adjust so it adds up.'}</div>
+      <div style="display:flex;gap:8px;margin-top:14px">
+        <button class="btn ghost sm" onclick="setAlloc(50,30,20)">50 / 30 / 20</button>
+        <button class="btn ghost sm" onclick="setAlloc(60,20,20)">60 / 20 / 20</button>
+        <button class="btn ghost sm" onclick="setAlloc(50,20,30)">Aggressive saving</button>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Data</h3>
+      <p class="muted" style="font-size:13px;margin:8px 0 14px">Your information is stored only in this browser. Export a backup whenever you like.</p>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <button class="btn ghost" onclick="exportData()">⬇ Export backup (JSON)</button>
+        <label class="btn ghost" style="text-align:center">⬆ Import backup<input type="file" accept="application/json" style="display:none" onchange="importData(this)"></label>
+        <button class="btn ghost" style="color:var(--bad)" onclick="resetAll()">Erase all data</button>
+      </div>
+      <div class="muted" style="font-size:12px;margin-top:16px">
+        Principles applied: pay yourself first, percentage-based budgeting, emergency fund as the first goal, and living below your means.
+      </div>
+    </div>
+  </div>`;
+}
+function allocSlider(k,label,val,col){
+  return `<div style="margin-bottom:14px">
+    <div class="row-between" style="margin-bottom:4px"><label style="font-size:13px;color:var(--text)">${label}</label><b id="allocval_${k}">${val}%</b></div>
+    <input type="range" min="0" max="100" value="${val}" style="width:100%;accent-color:${col}" oninput="liveAlloc('${k}',this.value)">
+  </div>`;
+}
+function liveAlloc(k,v){
+  state.settings.alloc[k] = +v||0;
+  save();
+  const lab=document.getElementById('allocval_'+k); if(lab) lab.textContent=v+'%';
+  const a=state.settings.alloc, sum=a.needs+a.wants+a.savings;
+  const se=document.getElementById('allocSum');
+  if(se){ se.textContent=sum+'%'; se.style.color = sum===100?'var(--good)':'var(--warn)'; }
+  const hint=document.getElementById('allocHint');
+  if(hint) hint.textContent = sum===100?'Balanced to 100%.':'The ideal total is 100%. Adjust so it adds up.';
+}
+
+/* ---------------- Mutations ---------------- */
+function updIncome(v){ getMonth(currentMonth).income = +v||0; save(); softRefreshAdvisor(); }
+function updInvest(v){ getMonth(currentMonth).invest = +v||0; save(); softRefreshAdvisor(); }
+function updCarryover(v){
+  const avail = compute(currentMonth).carryAvailable;
+  getMonth(currentMonth).usedCarryover = Math.max(0, Math.min(+v||0, avail));
+  save(); softRefreshAdvisor();
+}
+function useCarryover(v){ getMonth(currentMonth).usedCarryover = Math.max(0,+v||0); save(); render(); }
+function updItem(kind,i,field,v){
+  const arr = getMonth(currentMonth)[kind];
+  if(arr[i]) { arr[i][field] = field==='amount'? (+v||0) : v; save(); softRefreshAdvisor(); }
+}
+function addItem(kind){
+  const arr = getMonth(currentMonth)[kind];
+  if(kind==='recurring'||kind==='oneTime') arr.push({id:uid(),name:'',amount:0,cat:'wants'});
+  else arr.push({id:uid(),name:'',amount:0});
+  save(); render();
+}
+function delItem(kind,i){ getMonth(currentMonth)[kind].splice(i,1); save(); render(); }
+function updContribution(gid,v){ getMonth(currentMonth).contributions[gid] = +v||0; save(); softRefreshAdvisor(); }
+
+/* refresh advisor panel without losing input focus */
+function softRefreshAdvisor(){
+  if(activeView!=='plan'){ render(); return; }
+  const adv = document.querySelector('.advisor');
+  if(adv){
+    const c = compute(currentMonth); const a=state.settings.alloc;
+    adv.querySelector('.card').innerHTML = `
+        <h3>Recommended budget</h3>
+        <div class="muted" style="font-size:12px;margin:2px 0 12px">50/30/20 strategy · pay yourself first</div>
+        <div class="kv"><span>Total income</span><b>${money(c.income)}</b></div>
+        ${recoLine("Essentials",a.needs,c.tNeeds,c.needs)}
+        ${recoLine("Discretionary",a.wants,c.tWants,c.wants)}
+        ${recoLine("Savings+Inv.",a.savings,c.tSavings,c.savings)}
+        <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)">
+          <div class="muted" style="font-size:12px">Unassigned available</div>
+          <div class="big-remain" style="color:${c.remaining<0?'var(--bad)':c.remaining>0?'var(--good)':'var(--text)'}">${money(c.remaining)}</div>
+          <div class="muted" style="font-size:12px">After essentials + savings you have <b style="color:var(--text)">${money(c.afterNeedsSavings)}</b> to spend freely.</div>
+        </div>
+        ${buildAdvice(c).slice(0,3).map(x=>`<div class="advice ${x.cls}"><span class="ai">${x.icon}</span><span>${x.t}</span></div>`).join('')}`;
+  }
+  const c = compute(currentMonth);
+  const un = document.getElementById('usedNote');
+  if(un) un.innerHTML = `Using <b style="color:var(--text)">${money(c.used)}</b> of your accumulated savings.`;
+  const sn = document.getElementById('surplusNote');
+  if(sn) sn.innerHTML = `This month's surplus (<b style="color:var(--text)">${money(Math.max(0,c.netToPool))}</b>) will automatically be added to your accumulated savings.`;
+}
+
+function copyMonth(){
+  const prev = shiftMonth(currentMonth,-1);
+  const p = state.months[prev];
+  if(!p){ toast("No data for the previous month"); return; }
+  const cur = getMonth(currentMonth);
+  cur.income = p.income;
+  cur.invest = p.invest;
+  cur.extraIncome = p.extraIncome.map(x=>({...x,id:uid()}));
+  cur.bills = p.bills.map(x=>({...x,id:uid()}));
+  cur.recurring = p.recurring.map(x=>({...x,id:uid()}));
+  cur.oneTime = []; // one-time items are not copied
+  cur.contributions = {...p.contributions};
+  cur.usedCarryover = 0;
+  save(); render(); toast("Copied from "+monthLabel(prev));
+}
+function clearMonth(){
+  state.months[currentMonth] = blankMonth(); save(); render(); toast("Month reset");
+}
+function gotoMonth(key){ currentMonth=key; setView('plan'); }
+function stepYear(d){ annualYear+=d; render(); }
+
+/* Goals */
+function goalModal(id){
+  const g = id? state.goals.find(x=>x.id===id) : {name:'',target:'',saved:0,monthly:'',deadline:''};
+  openModal(`
+    <h3>${id?'Edit goal':'New savings goal'}</h3>
+    <div class="field"><label>Name</label><input class="inp" id="g_name" value="${esc(g.name)}" placeholder="e.g. Emergency fund"></div>
+    <div class="field"><label>Target amount</label><input class="inp" id="g_target" type="number" value="${g.target||''}" placeholder="0"></div>
+    <div class="field"><label>Already saved</label><input class="inp" id="g_saved" type="number" value="${g.saved||''}" placeholder="0"></div>
+    <div class="field"><label>Suggested monthly contribution (optional)</label><input class="inp" id="g_monthly" type="number" value="${g.monthly||''}" placeholder="0"></div>
+    <div class="field"><label>Target date (optional)</label><input class="inp" id="g_deadline" value="${esc(g.deadline||'')}" placeholder="e.g. Dec 2026"></div>
+    <div class="actions">
+      <button class="btn ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn" onclick="saveGoal('${id||''}')">Save</button>
+    </div>
+  `);
+}
+function saveGoal(id){
+  const get = x=>document.getElementById(x).value;
+  const name=get('g_name').trim();
+  if(!name){ toast("Give the goal a name"); return; }
+  const obj = {
+    name, target:+get('g_target')||0, saved:+get('g_saved')||0,
+    monthly:+get('g_monthly')||0, deadline:get('g_deadline').trim()
+  };
+  if(id){ Object.assign(state.goals.find(x=>x.id===id),obj); }
+  else { state.goals.push({id:uid(),...obj}); }
+  save(); closeModal(); render(); toast("Goal saved");
+}
+function delGoal(id){
+  if(!confirm("Delete this goal?")) return;
+  state.goals = state.goals.filter(x=>x.id!==id);
+  Object.values(state.months).forEach(m=>{ delete m.contributions[id]; });
+  save(); render();
+}
+function addToGoal(id){
+  const g = state.goals.find(x=>x.id===id);
+  openModal(`
+    <h3>Log savings — ${esc(g.name)}</h3>
+    <div class="field"><label>Amount to add</label><input class="inp" id="add_amt" type="number" placeholder="0" autofocus></div>
+    <div class="muted" style="font-size:12.5px">Current: ${money(g.saved)} of ${money(g.target)}</div>
+    <div class="actions">
+      <button class="btn ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn" onclick="confirmAddGoal('${id}')">Add</button>
+    </div>`);
+}
+function confirmAddGoal(id){
+  const amt = +document.getElementById('add_amt').value||0;
+  const g = state.goals.find(x=>x.id===id);
+  g.saved = Math.max(0, g.saved + amt);
+  save(); closeModal(); render(); toast("Savings logged");
+}
+
+/* Settings */
+function updAlloc(k,v){ state.settings.alloc[k] = +v||0; save(); }
+function setAlloc(n,w,s){ state.settings.alloc={needs:n,wants:w,savings:s}; save(); render(); toast(`Strategy ${n}/${w}/${s}`); }
+
+function exportData(){
+  const blob = new Blob([JSON.stringify(state,null,2)],{type:'application/json'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+  a.download=`finance-backup-${monthKey()}.json`; a.click();
+}
+function importData(input){
+  const f=input.files[0]; if(!f) return;
+  const r=new FileReader();
+  r.onload=()=>{ try{ const s=JSON.parse(r.result); if(s.months){ state=s; if(!state.settings) state.settings={alloc:{...DEFAULT_ALLOC}}; save(); render(); toast("Data imported"); } }catch(e){ toast("Invalid file"); } };
+  r.readAsText(f);
+}
+function resetAll(){
+  if(!confirm("This will erase ALL your data. Continue?")) return;
+  localStorage.removeItem(LS_KEY); state=load(); render(); toast("Data erased");
+}
+
+/* Modal + toast */
+function openModal(html){ document.getElementById('modalBox').innerHTML=html; document.getElementById('modalBg').classList.add('show'); }
+function closeModal(){ document.getElementById('modalBg').classList.remove('show'); }
+document.getElementById('modalBg').addEventListener('click',e=>{ if(e.target.id==='modalBg') closeModal(); });
+let toastT;
+function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('show'),2200); }
+
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+
+/* ---------------- Wiring ---------------- */
+document.getElementById('nav').addEventListener('click',e=>{ const b=e.target.closest('button'); if(b) setView(b.dataset.view); });
+document.getElementById('monthSel').addEventListener('change',e=>{ currentMonth=e.target.value; render(); });
+document.getElementById('prevMonth').addEventListener('click',()=>{ currentMonth=shiftMonth(currentMonth,-1); render(); });
+document.getElementById('nextMonth').addEventListener('click',()=>{ currentMonth=shiftMonth(currentMonth,1); render(); });
+window.setView=setView; window.render=render;
+
+Object.assign(window,{updIncome,updInvest,updItem,addItem,delItem,updContribution,copyMonth,clearMonth,
+  goalModal,saveGoal,delGoal,addToGoal,confirmAddGoal,updAlloc,liveAlloc,setAlloc,exportData,importData,resetAll,
+  closeModal,updCarryover,useCarryover,gotoMonth,stepYear});
+
+/* init */
+save();
+setView('dashboard');
+</script>
+</body>
+</html>

@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Personal Finance Advisor</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<meta name="theme-color" content="#0f1419">
+</head>
+<body>
+<div id="gate"></div>
+<div class="app" id="app" hidden>
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="logo">₡</div>
+      <div><h1>Finance Advisor</h1><p>Monthly planning</p></div>
+    </div>
+    <nav class="nav" id="nav">
+      <button data-view="dashboard" class="active" data-short="Home"><span class="ic">◎</span> <span class="lbl">Dashboard</span></button>
+      <button data-view="plan" data-short="Plan"><span class="ic">✎</span> <span class="lbl">Monthly Plan</span></button>
+      <button data-view="transactions" data-short="Activity"><span class="ic">≡</span> <span class="lbl">Transactions</span></button>
+      <button data-view="goals" data-short="Goals"><span class="ic">◈</span> <span class="lbl">Savings Goals</span></button>
+      <button data-view="annual" data-short="Year"><span class="ic">▤</span> <span class="lbl">Annual Review</span></button>
+      <button data-view="settings" data-short="Settings"><span class="ic">⚙</span> <span class="lbl">Settings</span></button>
+    </nav>
+    <div class="side-foot">
+      <span id="acctEmail"></span>
+      <span id="lastSaved"></span>
+      <button class="linkbtn" id="signOutBtn" type="button" hidden>Sign out</button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="topbar">
+      <div>
+        <h2 id="viewTitle">Financial dashboard</h2>
+        <div class="sub" id="viewSub"></div>
+      </div>
+      <div class="month-pick">
+        <button class="iconbtn" id="prevMonth" title="Previous month">‹</button>
+        <select id="monthSel"></select>
+        <button class="iconbtn" id="nextMonth" title="Next month">›</button>
+      </div>
+    </div>
+    <div id="views"></div>
+  </main>
+</div>
+
+<div class="modal-bg" id="modalBg">
+  <div class="modal" id="modalBox"></div>
+</div>
+<div class="toast" id="toast"></div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

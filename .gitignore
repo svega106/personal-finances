@@ -1,0 +1,21 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+.vite/
+
+# secrets — the anon key is public, but .env.local is still not for git
+.env
+.env.local
+.env.*.local
+
+# scratch
+*.log
+fingerprint.json
+err.txt
+transactions-*.png
+
+# os
+Thumbs.db
+.DS_Store

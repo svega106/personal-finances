@@ -1,0 +1,102 @@
+import './styles.css';
+import { init, save, flush, state } from './state.js';
+import { setRepo, hasInjectedRepo, getRepo } from './repo.js';
+import { configured, createSupabaseRepo, supabase } from './supabase-repo.js';
+import { currentSession, renderSignIn, renderNotConfigured, signOut } from './auth.js';
+import {
+  setView, render, setCurrentMonth, shiftCurrentMonth,
+  updIncome, updInvest, updItem, addItem, delItem, updContribution, copyMonth,
+  clearMonth, goalModal, saveGoal, delGoal, addToGoal, confirmAddGoal, updAlloc,
+  liveAlloc, setAlloc, exportData, importData, resetAll, closeModal, updCarryover,
+  useCarryover, gotoMonth, stepYear,
+} from './app.js';
+import { txSetFilter, txEdit, txSave, txDelete, txRateModal } from './tx-actions.js';
+import { loadReference, loadMonth } from './tx.js';
+import { updateNavBadge } from './views-tx.js';
+
+function showApp(email) {
+  document.getElementById('gate').innerHTML = '';
+  document.getElementById('app').hidden = false;
+  const e = document.getElementById('acctEmail');
+  if (e && email) e.textContent = email;
+  const out = document.getElementById('signOutBtn');
+  if (out && email) {
+    out.hidden = false;
+    out.addEventListener('click', () => signOut());
+  }
+}
+
+function wire() {
+  document.getElementById('nav').addEventListener('click', e => {
+    const b = e.target.closest('button'); if (b) setView(b.dataset.view);
+  });
+  document.getElementById('monthSel').addEventListener('change', e => setCurrentMonth(e.target.value));
+  document.getElementById('prevMonth').addEventListener('click', () => shiftCurrentMonth(-1));
+  document.getElementById('nextMonth').addEventListener('click', () => shiftCurrentMonth(1));
+
+  window.setView = setView;
+  window.render = render;
+  window.flush = flush;
+
+  Object.assign(window, {
+    updIncome, updInvest, updItem, addItem, delItem, updContribution, copyMonth, clearMonth,
+    goalModal, saveGoal, delGoal, addToGoal, confirmAddGoal, updAlloc, liveAlloc, setAlloc,
+    exportData, importData, resetAll, closeModal, updCarryover, useCarryover, gotoMonth, stepYear,
+    txSetFilter, txEdit, txSave, txDelete, txRateModal,
+  });
+}
+
+async function boot() {
+  // Tests inject a repository and skip the gate entirely.
+  if (hasInjectedRepo()) {
+    setRepo(getRepo());
+    try {
+      await init();
+      await loadReference();
+    } catch (err) {
+      // A repo missing part of the contract would otherwise leave a blank page
+      // and a harness hanging on a selector that never appears.
+      console.error('[boot]', err);
+      document.getElementById('gate').innerHTML =
+        `<div style="padding:24px"><h2>Repository error</h2>
+         <p class="muted">${err.message}</p></div>`;
+      return;
+    }
+    showApp(null);
+    wire();
+    setView('dashboard');
+    return;
+  }
+
+  if (!configured) { renderNotConfigured(); return; }
+
+  const session = await currentSession();
+  if (!session) { renderSignIn(); return; }
+
+  setRepo(createSupabaseRepo());
+
+  try {
+    await init();
+    await loadReference();
+  } catch (err) {
+    console.error('[boot]', err);
+    renderSignIn({ reason: `Could not load your data: ${err.message}` });
+    return;
+  }
+
+  showApp(session.user?.email ?? null);
+  wire();
+  setView('dashboard');
+
+  // Populate the review badge without making the user open the view first.
+  loadMonth(new Date().toISOString().slice(0, 7))
+    .then(updateNavBadge)
+    .catch(() => {});
+
+  // A sign-out in another tab should not leave this one showing stale data.
+  supabase.auth.onAuthStateChange((event) => {
+    if (event === 'SIGNED_OUT') window.location.reload();
+  });
+}
+
+boot();

@@ -1,0 +1,13 @@
+import { chromium } from 'playwright';
+const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome' });
+const p = await b.newPage();
+const errs = [];
+p.on('pageerror', e => errs.push(String(e)));
+await p.goto('http://localhost:4210/', { waitUntil: 'networkidle' });
+await p.waitForTimeout(600);
+const gate = await p.evaluate(() => document.getElementById('gate').innerText.trim());
+const appHidden = await p.evaluate(() => document.getElementById('app').hidden);
+console.log('gate text :', JSON.stringify(gate.split('\n')[0]));
+console.log('app hidden:', appHidden);
+console.log('pageErrors:', errs.length);
+await b.close();
