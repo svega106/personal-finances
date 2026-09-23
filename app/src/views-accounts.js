@@ -174,7 +174,7 @@ function accountRow(b, monthKey, { owed = false } = {}) {
         : `${staleLabel(b)}${cardOn(b)}`}</div>
       ${!owed && b.pendingFx
         ? `<div class="acct-warn">${b.pendingFx} foreign charge${b.pendingFx === 1 ? '' : 's'}
-             not in this balance — no rate set for ${esc(monthKey)}</div>`
+             not in this balance — no exchange rate on record yet</div>`
         : ''}
     </div>
     <div class="acct-amt">
@@ -194,7 +194,10 @@ function savingsSection(list, monthKey) {
   <p class="muted acct-note">
     Yours to keep current: a transfer or a deposit sends no email, so the app
     only knows what you tell it. Anything recorded after the date you set is
-    added on top — including card spending, where an account has a card.
+    added on top — including card spending, where an account has a card. A
+    foreign charge on such a card is converted by the bank the moment it
+    lands, so it is counted straight away at the month's rate; that figure is
+    a close approximation rather than the bank's own.
   </p>
   <div class="card acct-list">
     ${rows.length

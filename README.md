@@ -146,8 +146,17 @@ owed. A dollar purchase on it is debited in colones at the bank's rate, so a
 charge whose currency does not match falls back to the card alone — but only
 when exactly one account carries that card, never for a split credit card.
 
-Until the month's exchange rate is set, a foreign charge is left out of the
-balance rather than guessed at, and the account row says how many.
+The two kinds of card settle differently, and the balance view treats them so:
+
+- **Credit card** — a dollar charge sits on the dollar balance until the month
+  closes. Only that month's own rate will convert it; a stale one would
+  misstate what is owed, so until the rate is set the charge is left out and
+  the row says how many are missing.
+- **Debit card** — the bank converts at its own rate the moment the charge
+  lands and the colones are gone. Holding it back would report a balance that
+  is too high for money already spent, so it counts straight away: the month's
+  rate if set, otherwise the most recent one. The email only ever says
+  "USD 4.99", so this is a close approximation, not the bank's own figure.
 
 ### Work expenses
 
