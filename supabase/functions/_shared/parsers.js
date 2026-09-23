@@ -212,11 +212,28 @@ function parseDavivienda(body) {
 
 function parsePromerica(body) {
   const t = normalize(body);
-  // Labels carry no colon, and value may sit on the same line or the next.
+
+  /**
+   * Labels carry no colon, and the value may be on the same line or the next.
+   *
+   * That second case is not hypothetical: Promerica wraps only the Monto
+   * value in a <p>, so any converter that breaks at block boundaries leaves
+   * "Monto" alone on its line with the amount below it. Every other field of
+   * the same email is a plain table cell and stays on one line — which is why
+   * a charge would import everything except its amount, and be thrown away
+   * for "Missing Monto".
+   */
   const field = (label) => {
-    const m = t.match(new RegExp(`^${label}[ \\t]+(.*)$`, 'im'));
-    const v = m ? m[1].trim() : '';
-    return v === '' ? null : v;
+    const m = t.match(new RegExp(`^${label}[ \\t|]*(.*)$`, 'im'));
+    if (!m) return null;
+
+    const clean = (s) => s.replace(/\|/g, ' ').trim();
+    const same = clean(m[1]);
+    if (same) return same;
+
+    const next = t.slice(m.index + m[0].length)
+      .split('\n').map(clean).find((line) => line);
+    return next || null;
   };
 
   const money = need(field('Monto'), 'Monto', 'promerica');

@@ -83,3 +83,44 @@ test('an email with neither body nor html is reported, not crashed on', () => {
   assert.equal(res.ok, false);
   assert.equal(res.reason, 'empty');
 });
+
+
+/* ------------------------------------------------------------- Promerica */
+
+const PROM = readFileSync(join(here, 'fixtures', 'promerica-2026-09-16.html'), 'utf8');
+const PROM_FROM = 'info@promerica.fi.cr';
+const PROM_SUBJECT = 'Tu transacción fue procesada ¡Revisá tu comprobante!';
+
+test('a Promerica voucher parses from its HTML', () => {
+  const { ok, record, detail } = parseEmail({ from: PROM_FROM, subject: PROM_SUBJECT, html: PROM });
+  assert.equal(ok, true, detail);
+  assert.equal(record.merchantRaw, 'DELTA PIRRO HEREDIA CR');
+  assert.equal(record.last4, '1763');
+  assert.equal(record.currency, 'CRC');
+  assert.equal(record.amount, 20000);
+  assert.equal(record.authCode, '828703');
+  assert.equal(record.reference, '4254467398');
+  assert.equal(record.mcc, 'GAS STATIONS');
+  assert.equal(record.postedAt, '2026-09-16T17:53:00-06:00');
+});
+
+test('the amount is found even though it sits on the next line', () => {
+  // Promerica wraps only the Monto value in a <p>, so a converter that breaks
+  // at block boundaries leaves the label alone on its line. Every other field
+  // of the same email is a plain cell — which is how a charge could import
+  // everything but its amount and then be discarded for "Missing Monto".
+  const text = htmlToText(PROM);
+  assert.match(text, /^\s*Monto\s*\|?\s*$/m, 'the label really is on its own line');
+  assert.equal(parseEmail({ from: PROM_FROM, subject: PROM_SUBJECT, html: PROM }).record.amount, 20000);
+});
+
+test('numeric HTML entities are decoded, not left as text', () => {
+  // Promerica's spacer cells are &#8202; (hair space).
+  const text = htmlToText(PROM);
+  assert.ok(!text.includes('&#8202;'), 'raw entity leaked into the text');
+  assert.ok(!/&#\d+;/.test(text), 'some numeric entity was left undecoded');
+});
+
+test('carriage returns do not survive into the text', () => {
+  assert.ok(!htmlToText(PROM).includes('\r'), 'a stray \\r breaks [ \\t]-anchored patterns');
+});

@@ -9,6 +9,9 @@
  */
 export function htmlToText(html) {
   return String(html || '')
+    // Mail is CRLF. A stray \r left in the middle of a line is invisible in a
+    // log and breaks any pattern anchored with [ \t].
+    .replace(/\r\n?/g, '\n')
     .replace(/<style[\s\S]*?<\/style>/gi, '')
     .replace(/<script[\s\S]*?<\/script>/gi, '')
     .replace(/<head[\s\S]*?<\/head>/gi, '')
@@ -26,6 +29,11 @@ export function htmlToText(html) {
     .replace(/&gt;/g, '>')
     .replace(/&#39;|&apos;/g, "'")
     .replace(/&quot;/g, '"')
+    // Decode the rest by number rather than keeping a list. Promerica's
+    // spacer cells are &#8202; (hair space); left undecoded they turn into
+    // literal "&#8202;" in the middle of the text and in every error sample.
+    .replace(/&#(\d+);/g, (_, n) => codePoint(Number(n)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, n) => codePoint(parseInt(n, 16)))
     // Collapse the whitespace that stripping tags leaves behind, but keep
     // line structure: some parsers match per line.
     .replace(/[ \t]{2,}/g, ' ')
@@ -36,4 +44,14 @@ export function htmlToText(html) {
     .replace(/[ \t]+\n/g, '\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
+}
+
+/**
+ * Entity code point to text. Anything in the space-separator category becomes
+ * an ordinary space, so field patterns can rely on [ \t] meaning "gap".
+ */
+function codePoint(n) {
+  if (!Number.isFinite(n) || n < 9 || n > 0x10ffff) return ' ';
+  const ch = String.fromCodePoint(n);
+  return /\s|\u00a0|\u2000-\u200a|\u202f|\u205f|\u3000/.test(ch) ? ' ' : ch;
 }
