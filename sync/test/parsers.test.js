@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseEmail, normalize, _internal } from '../src/parsers/index.js';
+import { parseEmail, normalize, _internal } from '../../supabase/functions/_shared/parsers.js';
 
 /**
  * Bodies below are real September 2026 emails, copied verbatim, including the

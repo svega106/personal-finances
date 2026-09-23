@@ -1,1 +1,8 @@
-{"type":"module","name":"fin-parsers","private":true}
+{
+  "type": "module",
+  "name": "fin-parsers",
+  "private": true,
+  "scripts": {
+    "test": "node --test \"test/*.test.js\""
+  }
+}

@@ -10,6 +10,7 @@
  * transaction is a deliberate action, not typing.
  */
 import { getRepo } from './repo.js';
+import { matchRule as sharedMatchRule } from '../../supabase/functions/_shared/classify.js';
 
 /** month key -> transactions, so switching months back and forth is free. */
 const byMonth = new Map();
@@ -108,54 +109,14 @@ export async function removeTransaction(tx) {
  * First matching rule wins, in priority order. Returns the fields a rule
  * contributes, never a whole transaction — the caller decides what to apply.
  */
+/**
+ * Classifying a charge lives in a shared module, so a merchant lands in the
+ * same category whether you entered it here or a bank email brought it in.
+ * The shared function is pure, so the module's own `rules` are passed in.
+ */
 export function matchRule(merchantRaw, mcc) {
-  const hay = String(merchantRaw || '').toUpperCase();
-  const sorted = [...rules].sort((a, b) => a.priority - b.priority);
-
-  for (const r of sorted) {
-    const pat = String(r.pattern || '').toUpperCase();
-    if (!pat) continue;
-    let hit = false;
-    if (r.matchType === 'exact') hit = hay === pat;
-    else if (r.matchType === 'regex') {
-      try { hit = new RegExp(r.pattern, 'i').test(merchantRaw); } catch { hit = false; }
-    } else hit = hay.includes(pat);
-
-    if (hit) {
-      return {
-        cat: r.cat ?? null,
-        budgetLineId: r.budgetLineId ?? null,
-        scope: r.scope ?? null,
-        merchant: r.merchantClean ?? null,
-        ruleId: r.id,
-      };
-    }
-  }
-
-  // Promerica supplies a merchant category; use it only when no rule matched.
-  const fromMcc = MCC_DEFAULTS[String(mcc || '').toUpperCase()];
-  if (fromMcc) return { cat: fromMcc, budgetLineId: null, scope: null, merchant: null, ruleId: null };
-
-  return null;
+  return sharedMatchRule(rules, merchantRaw, mcc);
 }
-
-/** Coarse defaults. A rule always beats these. */
-const MCC_DEFAULTS = {
-  'GAS STATIONS': 'needs',
-  'GROCERY STORES': 'needs',
-  'SUPERMARKETS': 'needs',
-  PHARMACIES: 'needs',
-  'DRUG STORES': 'needs',
-  'MEDICAL SERVICES': 'needs',
-  UTILITIES: 'needs',
-  'CARE AN REPAIR': 'needs',
-  RESTAURANTS: 'wants',
-  'FAST FOOD': 'wants',
-  'EATING PLACES': 'wants',
-  'BARS AND TAVERNS': 'wants',
-  'RECORD STORES': 'wants',
-  'SPORTING GOODS': 'wants',
-};
 
 /* --------------------------------------------------------------- totals */
 

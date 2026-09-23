@@ -8,8 +8,8 @@ happened, with card charges read from bank notification emails.
 | Folder | Holds |
 | --- | --- |
 | `app/` | The web app — Vite, vanilla JS, Supabase |
-| `supabase/` | Database migrations, run in order |
-| `sync/` | Bank email parsers, and later the sync worker |
+| `supabase/` | Database migrations, and the email ingest function |
+| `sync/` | Tests for the parsers, and the Apps Script that fetches the mail |
 | `tools/` | Test harnesses: smoke tests and screenshots |
 | `finance-advisor.html` | The original single-file app, kept for reference |
 
@@ -26,8 +26,15 @@ npm run dev
 ## Tests
 
 ```
-cd app  && npm test                      # persistence
-cd sync && node --test "test/*.test.js"  # email parsers
+cd app  && npm test   # persistence
+cd sync && npm test   # email parsers, and the row they produce
+```
+
+The ingest function is an HTTP endpoint, so it is driven with real requests
+against a stubbed database:
+
+```
+cd sync/edge-test && deno run --allow-net --allow-env --allow-read handler.test.ts
 ```
 
 Browser-level checks live in `tools/` and need the app running:
@@ -36,3 +43,56 @@ Browser-level checks live in `tools/` and need the app running:
 node tools/smoke.mjs    http://localhost:4173/   # the five original views
 node tools/tx-smoke.mjs http://localhost:4173/   # the transactions view
 ```
+
+
+## How charges get in
+
+```
+Gmail ──▶ Apps Script ──▶ POST /functions/v1/ingest-email ──▶ Postgres
+         (fetch only)      (parse, classify, write)
+```
+
+Apps Script only fetches and forwards. Every bank-specific rule lives in
+`supabase/functions/_shared/parsers.js`, in this repo, under test — the same
+module the browser uses, so a merchant is categorized identically whether you
+typed it in or an email brought it in.
+
+It runs inside the Google account rather than calling the Gmail API from a
+server. A server needs an OAuth client, and Google expires refresh tokens
+after 7 days while the consent screen sits in "Testing" — a cron job that dies
+every week. Running as the account itself means no token to rotate and nothing
+to verify.
+
+### Setting it up
+
+1. **Deploy the function.** From the repo root:
+
+   ```
+   npx supabase functions deploy ingest-email --no-verify-jwt
+   ```
+
+   `--no-verify-jwt` is deliberate: the caller is a script, not a signed-in
+   person, so there is no user JWT to check. The shared secret below is the
+   authentication.
+
+2. **Set the secret.** Invent a long random string. In the Supabase dashboard,
+   Edge Functions → Secrets, add `INGEST_SECRET`. `SUPABASE_URL` and
+   `SUPABASE_SERVICE_ROLE_KEY` are provided automatically — never copy the
+   service-role key anywhere else.
+
+3. **Create the script.** At script.google.com, new project, paste
+   `sync/apps-script/Code.gs`. In Project Settings → Script properties add:
+
+   | Key | Value |
+   | --- | --- |
+   | `INGEST_URL` | `https://<project-ref>.supabase.co/functions/v1/ingest-email` |
+   | `INGEST_SECRET` | the same string as above |
+
+4. **Authorize and schedule.** Run `setUp` once and approve the Gmail prompt.
+   Then Triggers → add trigger → `syncNow`, time-driven, every 15 minutes.
+
+Charges arrive **unreviewed**, so they show in the app's review badge until
+you have looked at them. A re-run never overwrites a charge you have already
+edited — the write ignores rows whose `ext_id` is already present.
+
+To re-import after fixing a parser, run `resyncLastDays(7)` in the script.
