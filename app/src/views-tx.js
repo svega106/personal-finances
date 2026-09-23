@@ -29,9 +29,24 @@ function esc(s) {
   ));
 }
 
-function dayLabel(iso) {
-  const d = new Date(iso);
-  return d.toLocaleDateString('en-US', {
+/**
+ * The Costa Rica calendar day a charge belongs to, as YYYY-MM-DD.
+ *
+ * Postgres returns `timestamptz` normalized to UTC, so slicing the string
+ * gives the UTC date — and any charge after 6pm local is already "tomorrow"
+ * there. That split one evening across two headings and sorted an 8pm charge
+ * below a midday one. The day has to be computed in the zone the card was
+ * actually used in.
+ */
+function dayKey(iso) {
+  return new Date(iso).toLocaleDateString('en-CA', { timeZone: 'America/Costa_Rica' });
+}
+
+/** Takes the key from dayKey(), not a raw timestamp. */
+function dayLabel(key) {
+  // Noon, so the label cannot be dragged into the neighbouring day by an
+  // offset the way a bare `new Date('2026-09-21')` (UTC midnight) would be.
+  return new Date(`${key}T12:00:00-06:00`).toLocaleDateString('en-US', {
     weekday: 'short', day: 'numeric', month: 'short', timeZone: 'America/Costa_Rica',
   });
 }
@@ -208,19 +223,23 @@ function empty(totalInMonth) {
 function groupByDay(rows) {
   const days = new Map();
   for (const t of rows) {
-    const k = String(t.postedAt).slice(0, 10);
+    const k = dayKey(t.postedAt);
     if (!days.has(k)) days.set(k, []);
     days.get(k).push(t);
   }
 
   return [...days.entries()].map(([day, list]) => {
-    const dayTotal = list.reduce(
-      (s, t) => s + (t.kind === 'expense' && t.scope !== 'work' ? t.amountCrc : 0), 0,
-    );
+    // effectiveCrc, not amountCrc: a foreign charge has no colón value of its
+    // own, so a raw read would silently drop it from the day even after the
+    // month's rate has been set.
+    const dayTotal = list.reduce((s, t) => {
+      if (t.kind !== 'expense' || t.scope === 'work') return s;
+      return s + (effectiveCrc(t) ?? 0);
+    }, 0);
     return `
     <div class="tx-day">
       <div class="tx-day-head">
-        <span>${dayLabel(list[0].postedAt)}</span>
+        <span>${dayLabel(day)}</span>
         <span class="muted">${money(dayTotal)}</span>
       </div>
       <div class="card tx-list">
@@ -288,4 +307,7 @@ export function blankTx(monthKey) {
 }
 
 export { CATS, esc };
+// Exported for tests: the timezone handling here is easy to get wrong and
+// was wrong once already.
+export { dayKey, dayLabel };
 export { saveTransaction, removeTransaction, matchRule, loadMonth };
