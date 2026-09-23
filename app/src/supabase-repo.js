@@ -379,13 +379,25 @@ export function extendWithBalances(repo) {
         scope: a.scope || 'personal',
         active: a.active === undefined ? true : !!a.active,
         sort_order: a.sortOrder ?? 200,
+        // A card is recorded on the account it spends from, so these belong
+        // here rather than on an account of their own.
+        issuer: a.issuer || null,
+        brand: a.brand || null,
+        last4: a.last4 || null,
       };
       if (a.id) row.id = a.id;
       const { data, error } = await supabase
         .from('accounts').upsert(row)
         .select('id, label, type, issuer, institution, brand, last4, default_currency, scope, active, sort_order')
         .single();
-      if (error) boom('save account', error);
+      if (error) {
+        // The unique index is on (user_id, issuer, last4, currency). Saying so
+        // is more use than the constraint name.
+        if (error.code === '23505') {
+          throw new Error(`Another account already has card ····${a.last4} in ${a.currency || 'CRC'}`);
+        }
+        boom('save account', error);
+      }
       return {
         id: data.id, label: data.label, type: data.type, issuer: data.issuer,
         institution: data.institution, brand: data.brand, last4: data.last4,
@@ -397,6 +409,17 @@ export function extendWithBalances(repo) {
      * Accounts are archived, never deleted: transactions and snapshots point
      * at them, and history should not change because a card was closed.
      */
+    async countTransactions(accountId) {
+      const uid = await userId();
+      const { count, error } = await supabase
+        .from('transactions')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', uid)
+        .or(`account_id.eq.${accountId},counterparty_account_id.eq.${accountId}`);
+      if (error) boom('count transactions', error);
+      return count ?? 0;
+    },
+
     async archiveAccount(id) {
       const uid = await userId();
       const { error } = await supabase

@@ -12,7 +12,7 @@ import {
 } from './app.js';
 import { txSetFilter, txEdit, txSave, txDelete, txRateModal } from './tx-actions.js';
 import {
-  acctUpdate, acctAdd, acctPickWork, acctSelectAllWork,
+  acctUpdate, acctAdd, acctEdit, acctArchive, acctPickWork, acctSelectAllWork,
   acctSettleOne, acctSettleSelected, acctUnsettle,
 } from './accounts-actions.js';
 import { loadReference, loadMonth } from './tx.js';
@@ -47,7 +47,7 @@ function wire() {
     goalModal, saveGoal, delGoal, addToGoal, confirmAddGoal, updAlloc, liveAlloc, setAlloc,
     exportData, importData, resetAll, closeModal, updCarryover, useCarryover, gotoMonth, stepYear,
     txSetFilter, txEdit, txSave, txDelete, txRateModal,
-    acctUpdate, acctAdd, acctPickWork, acctSelectAllWork,
+    acctUpdate, acctAdd, acctEdit, acctArchive, acctPickWork, acctSelectAllWork,
     acctSettleOne, acctSettleSelected, acctUnsettle,
   });
 }

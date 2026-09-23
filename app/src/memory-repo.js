@@ -154,6 +154,11 @@ export function createMemoryRepo(seed = {}) {
       return structuredClone(row);
     },
 
+    async countTransactions(accountId) {
+      return store.transactions.filter(
+        (t) => t.accountId === accountId || t.counterpartyAccountId === accountId).length;
+    },
+
     async archiveAccount(id) {
       const at = store.accounts.findIndex((x) => x.id === id);
       if (at >= 0) store.accounts.splice(at, 1); // listAccounts returns active only

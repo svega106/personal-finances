@@ -180,7 +180,10 @@ function accountRow(b, monthKey, { owed = false } = {}) {
     <div class="acct-amt">
       <div>${fmt(shown, b.currency)}${secondary}</div>
     </div>
-    ${owed ? '' : `<button class="btn ghost sm" onclick="acctUpdate('${esc(b.accountId)}')">Update</button>`}
+    ${owed
+      ? `<button class="btn ghost sm" onclick="acctEdit('${esc(b.accountId)}')">Edit</button>`
+      : `<button class="btn ghost sm" onclick="acctUpdate('${esc(b.accountId)}')">Update</button>
+         <button class="btn ghost sm" onclick="acctEdit('${esc(b.accountId)}')">Edit</button>`}
   </div>`;
 }
 

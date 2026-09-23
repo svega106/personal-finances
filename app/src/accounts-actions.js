@@ -76,70 +76,185 @@ export function acctUpdate(accountId) {
   });
 }
 
-/* --------------------------------------------------------- add an account */
+/* ------------------------------------------------- adding and editing accounts */
 
-export function acctAdd() {
-  openModal(`
-    <h3>Add an account</h3>
+/**
+ * One form for both. Adding and editing an account differ only in whether
+ * there is something to archive and whether the currency is still free to
+ * choose, so keeping them apart would mean two forms drifting out of step.
+ */
+function accountForm(a) {
+  const isNew = !a?.id;
+  const type = a?.type || 'savings';
+  const isCard = type === 'card';
+
+  return `
+    <h3>${isNew ? 'Add an account' : esc(a.label)}</h3>
     <p class="muted" style="font-size:13px;margin:-4px 0 16px;line-height:1.55">
-      For savings, investments or cash you keep track of yourself. Cards come
-      from your bank emails and do not need to be added here.
+      ${isNew
+        ? 'For savings, investments or cash you keep track of yourself.'
+        : 'Renaming is safe at any time — transactions follow the account, not its name.'}
     </p>
 
     <div class="field"><label>Name</label>
-      <input class="inp" id="acc_label" placeholder="e.g. Ahorros BAC" autofocus></div>
+      <input class="inp" id="acc_label" value="${esc(a?.label ?? '')}"
+             placeholder="e.g. Ahorros BAC"${isNew ? ' autofocus' : ''}></div>
 
     <div class="tx-2col">
       <div class="field"><label>Kind</label>
-        <select class="inp" id="acc_type">
-          <option value="savings">Savings</option>
-          <option value="investment">Investment</option>
-          <option value="cash">Cash</option>
+        <select class="inp" id="acc_type"${isCard ? ' disabled' : ''}>
+          ${isCard ? '<option value="card" selected>Card</option>' : ''}
+          <option value="savings"${type === 'savings' ? ' selected' : ''}>Savings</option>
+          <option value="investment"${type === 'investment' ? ' selected' : ''}>Investment</option>
+          <option value="cash"${type === 'cash' ? ' selected' : ''}>Cash</option>
         </select></div>
       <div class="field"><label>Currency</label>
-        <select class="inp" id="acc_currency">
-          <option value="CRC">CRC</option>
-          <option value="USD">USD</option>
+        <select class="inp" id="acc_currency"${isNew ? '' : ' disabled'}>
+          <option value="CRC"${(a?.currency ?? 'CRC') === 'CRC' ? ' selected' : ''}>CRC</option>
+          <option value="USD"${a?.currency === 'USD' ? ' selected' : ''}>USD</option>
         </select></div>
     </div>
+    ${isNew ? '' : `<p class="muted" style="font-size:11.5px;margin:-8px 0 14px">
+      Currency is fixed once an account exists — its balance and every charge
+      on it are already in that currency. Archive it and add another instead.
+    </p>`}
 
     <div class="field"><label>Bank (optional)</label>
-      <input class="inp" id="acc_inst" placeholder="e.g. BAC Credomatic"></div>
+      <input class="inp" id="acc_inst" value="${esc(a?.institution ?? '')}"
+             placeholder="e.g. BAC Credomatic"></div>
+
+    ${isCard ? '' : `
+    <div class="field"><label>Card on this account (optional)</label>
+      <div class="tx-2col">
+        <select class="inp" id="acc_issuer">
+          <option value="">— no card —</option>
+          ${[['bac', 'BAC'], ['davivienda', 'Davivienda'], ['promerica', 'Promerica'], ['bncr', 'BNCR']]
+            .map(([k, l]) => `<option value="${k}"${a?.issuer === k ? ' selected' : ''}>${l}</option>`).join('')}
+        </select>
+        <input class="inp" id="acc_last4" value="${esc(a?.last4 ?? '')}"
+               placeholder="Last 4 digits" inputmode="numeric" maxlength="4">
+      </div>
+      <div class="muted" style="font-size:11.5px;margin-top:5px;line-height:1.45">
+        A debit card is not an account of its own — it spends from this one, so
+        its charges come straight off this balance.
+      </div></div>`}
 
     <div class="actions">
-      <span></span>
+      ${isNew ? '<span></span>'
+        : `<button class="btn ghost danger" onclick="acctArchive('${esc(a.id)}')">Archive</button>`}
       <button class="btn ghost" onclick="closeModal()">Cancel</button>
-      <button class="btn" id="acc_save">Add</button>
-    </div>`);
+      <button class="btn" id="acc_save">${isNew ? 'Add' : 'Save'}</button>
+    </div>`;
+}
 
+export function acctAdd() {
+  openModal(accountForm(null));
+  wireAccountForm(null);
+}
+
+export function acctEdit(id) {
+  const a = getAccounts().find((x) => x.id === id);
+  if (!a) { toast('Account not found'); return; }
+  openModal(accountForm(a));
+  wireAccountForm(a);
+}
+
+function wireAccountForm(existing) {
   document.getElementById('acc_save')?.addEventListener('click', async () => {
     const label = val('acc_label').trim();
     if (!label) { toast('Give the account a name'); return; }
-    if (getAccounts().some((a) => a.label.toLowerCase() === label.toLowerCase())) {
-      toast('An account with that name already exists'); return;
-    }
+
+    const clash = getAccounts().some(
+      (x) => x.id !== existing?.id && x.label.toLowerCase() === label.toLowerCase());
+    if (clash) { toast('An account with that name already exists'); return; }
+
+    const last4 = val('acc_last4').replace(/\D/g, '');
+    const issuer = val('acc_issuer');
+    if (issuer && last4.length !== 4) { toast('A card needs its last 4 digits'); return; }
+    if (last4 && !issuer) { toast('Choose which bank the card is from'); return; }
 
     const btn = document.getElementById('acc_save');
-    btn.disabled = true; btn.textContent = 'Adding…';
+    btn.disabled = true; btn.textContent = 'Saving…';
     try {
       await getRepo().upsertAccount({
+        id: existing?.id,
         label,
-        type: val('acc_type'),
-        currency: val('acc_currency'),
+        type: existing?.type === 'card' ? 'card' : val('acc_type'),
+        currency: existing ? existing.currency : val('acc_currency'),
         institution: val('acc_inst').trim() || null,
+        scope: existing?.scope || 'personal',
+        issuer: issuer || null,
+        brand: issuer ? (existing?.brand || null) : null,
+        last4: last4 || null,
       });
-      // The account list is loaded once at boot, so it has to be refreshed
-      // before the new account can be picked on a transaction.
-      await loadReference();
-      invalidateAccounts();
+      await refreshAccounts();
       closeModal();
-      render();
-      toast(`${label} added`);
+      toast(existing ? `${label} saved` : `${label} added`);
     } catch (err) {
-      btn.disabled = false; btn.textContent = 'Add';
-      toast(`Could not add: ${err.message}`);
+      btn.disabled = false; btn.textContent = existing ? 'Save' : 'Add';
+      toast(err.message);
     }
   });
+}
+
+/**
+ * Archiving, not deleting.
+ *
+ * Transactions and balance snapshots point at accounts. Removing one outright
+ * would either orphan that history or take it with it; archiving keeps every
+ * charge exactly where it was and only stops the account being offered.
+ */
+export async function acctArchive(id) {
+  const a = getAccounts().find((x) => x.id === id);
+  if (!a) { toast('Account not found'); return; }
+
+  let count = 0;
+  try {
+    count = await getRepo().countTransactions(id);
+  } catch {
+    count = 0; // not worth blocking on; the warning below is the cautious one
+  }
+
+  openModal(`
+    <h3>Archive ${esc(a.label)}?</h3>
+    <p class="muted" style="font-size:13px;margin:-4px 0 14px;line-height:1.55">
+      It stops appearing in lists and totals. Nothing is deleted — the account
+      can be brought back, and its history is kept either way.
+    </p>
+    ${count ? `<div class="card" style="padding:12px 14px;margin-bottom:16px">
+      <b>${count} transaction${count === 1 ? '' : 's'}</b>
+      ${count === 1 ? 'points' : 'point'} at this account.
+      <span class="muted">${count === 1 ? 'It stays' : 'They stay'} in your ledger, but
+      ${count === 1 ? 'stops' : 'stop'} counting towards any balance while it is
+      archived.</span>
+    </div>` : ''}
+    <div class="actions">
+      <span></span>
+      <button class="btn ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn danger" id="acc_archive">Archive</button>
+    </div>`);
+
+  document.getElementById('acc_archive')?.addEventListener('click', async () => {
+    const btn = document.getElementById('acc_archive');
+    btn.disabled = true; btn.textContent = 'Archiving…';
+    try {
+      await getRepo().archiveAccount(id);
+      await refreshAccounts();
+      closeModal();
+      toast(`${a.label} archived`);
+    } catch (err) {
+      btn.disabled = false; btn.textContent = 'Archive';
+      toast(`Could not archive: ${err.message}`);
+    }
+  });
+}
+
+/** The account list is loaded once at boot, so it has to be re-read. */
+async function refreshAccounts() {
+  await loadReference();
+  invalidateAccounts();
+  invalidateWork();
+  render();
 }
 
 /* ------------------------------------------------------ work reimbursement */

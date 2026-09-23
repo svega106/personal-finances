@@ -84,6 +84,8 @@ await page.addInitScript((seed) => {
     listAccounts: async () => clone(store.accounts),
     listRules: async () => clone(store.rules),
     listFxRates: async () => clone(store.fxRates || []),
+    countTransactions: async (id) => (store.transactions || [])
+      .filter((t) => t.accountId === id || t.counterpartyAccountId === id).length,
     listWorkCharges: async ({ since }) => clone(store.transactions || [])
       .filter((t) => t.scope === 'work' && t.postedAt >= since)
       .sort((a, b) => (a.postedAt < b.postedAt ? 1 : -1)),
