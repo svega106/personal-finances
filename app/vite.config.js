@@ -10,6 +10,12 @@ import { defineConfig } from 'vite';
  * fine but the dev server refuses to serve without being told.
  */
 export default defineConfig({
+  // Empty, but required. Cloudflare's build step rewrites this config to add
+  // its own plugin, and it fails with "could not find a valid plugins array"
+  // if there is nothing to add to. Deleting this line breaks the deploy, not
+  // the local build — so nothing here would catch it.
+  plugins: [],
+
   server: {
     fs: { allow: ['..'] },
   },
