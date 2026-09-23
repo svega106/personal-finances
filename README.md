@@ -104,11 +104,29 @@ to verify.
    | `INGEST_URL` | `https://<project-ref>.supabase.co/functions/v1/ingest-email` |
    | `INGEST_SECRET` | the same string as above |
 
-4. **Authorize and schedule.** Run `setUp` once and approve the Gmail prompt.
-   Then Triggers → add trigger → `syncNow`, time-driven, every 15 minutes.
+4. **Authorize.** Save the file (Ctrl+S — the editor only lists saved
+   functions). In the toolbar above the code, pick **`setUp`** from the
+   function dropdown and click **▷ Run**.
+
+   Google will warn that the app is unverified; it is your own script, so
+   **Advanced → Go to (project name) → Allow**. The Execution log at the
+   bottom should print `Ready. Watermark: <a date 30 days ago>`.
+
+   `setUp` exists only to trigger that permission prompt and write the
+   starting point. It imports nothing.
+
+5. **Schedule.** Clock icon in the left sidebar (Triggers) → **Add Trigger**:
+   function `syncNow`, source **Time-driven**, type **Minutes timer**, every
+   **15 minutes**.
+
+6. **Backfill.** Pick `syncNow` from the dropdown and Run once to confirm it
+   works end to end — the log prints how many messages went over and what came
+   back. To reach further back, run `resyncLast30Days` (or `…7Days` /
+   `…90Days`) instead. Those wrappers exist because the Run button cannot pass
+   an argument.
 
 Charges arrive **unreviewed**, so they show in the app's review badge until
 you have looked at them. A re-run never overwrites a charge you have already
 edited — the write ignores rows whose `ext_id` is already present.
 
-To re-import after fixing a parser, run `resyncLastDays(7)` in the script.
+To re-import after fixing a parser, run `resyncLast7Days` in the script.

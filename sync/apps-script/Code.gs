@@ -126,8 +126,20 @@ function htmlToText(html) {
     .trim();
 }
 
-/** Re-import a window by hand, e.g. after fixing a parser. */
+/**
+ * Re-import a window by hand, e.g. after fixing a parser.
+ *
+ * Re-importing is safe: the ingest function ignores a charge whose ext_id is
+ * already stored, so anything you have already categorized is left alone.
+ */
 function resyncLastDays(days) {
   PROPS.setProperty(WATERMARK, String(Math.floor(Date.now() / 1000) - (days || 7) * 86400));
   syncNow();
 }
+
+// The editor's Run button cannot pass arguments — it calls the selected
+// function with none. These wrappers exist so a backfill can be run from the
+// dropdown without editing code.
+function resyncLast7Days()  { resyncLastDays(7); }
+function resyncLast30Days() { resyncLastDays(30); }
+function resyncLast90Days() { resyncLastDays(90); }
