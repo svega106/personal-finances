@@ -104,14 +104,17 @@ test('a Promerica voucher parses from its HTML', () => {
   assert.equal(record.postedAt, '2026-09-16T17:53:00-06:00');
 });
 
-test('the amount is found even though it sits on the next line', () => {
-  // Promerica wraps only the Monto value in a <p>, so a converter that breaks
-  // at block boundaries leaves the label alone on its line. Every other field
-  // of the same email is a plain cell — which is how a charge could import
-  // everything but its amount and then be discarded for "Missing Monto".
-  const text = htmlToText(PROM);
-  assert.match(text, /^\s*Monto\s*\|?\s*$/m, 'the label really is on its own line');
+test('the amount is found however the converter lays it out', () => {
+  // Promerica wraps only the Monto value in a <p>, unlike every other field
+  // in the same email. The layout that produces is an implementation detail
+  // of whichever converter ran; that the amount is found is not.
   assert.equal(parseEmail({ from: PROM_FROM, subject: PROM_SUBJECT, html: PROM }).record.amount, 20000);
+
+  // And when it genuinely is split, which is what some converters do.
+  const split = 'Comercio DELTA PIRRO HEREDIA CR\nNúmero de tarjeta ****-****-****-1763\n'
+    + 'Fecha/hora 16 sep 2026 / 17:53\nNúmero de autorización 828703\n'
+    + 'Número de referencia 4254467398\nMonto\nCRC: 20,000.00';
+  assert.equal(parseEmail({ from: PROM_FROM, subject: PROM_SUBJECT, body: split }).record.amount, 20000);
 });
 
 test('numeric HTML entities are decoded, not left as text', () => {
@@ -123,4 +126,65 @@ test('numeric HTML entities are decoded, not left as text', () => {
 
 test('carriage returns do not survive into the text', () => {
   assert.ok(!htmlToText(PROM).includes('\r'), 'a stray \\r breaks [ \\t]-anchored patterns');
+});
+
+
+/* ------------------------------------------------------ BAC, and Mastercard */
+
+const BACMC = readFileSync(join(here, 'fixtures', 'bac-mastercard-2026-09-23.html'), 'utf8');
+const BAC_FROM = 'NotificacionBAC@baccredomatic.cr';
+const BAC_SUBJECT = 'Notificación de transacción APPLE.COM/BILL 23-09-2026 - 09:13';
+
+test('a BAC Mastercard notification parses', () => {
+  const { ok, record, detail } = parseEmail({ from: BAC_FROM, subject: BAC_SUBJECT, html: BACMC });
+  assert.equal(ok, true, detail);
+  assert.equal(record.merchantRaw, 'APPLE.COM/BILL');
+  assert.equal(record.brand, 'mastercard', 'BAC writes "MASTER:", not "MASTERCARD:"');
+  assert.equal(record.last4, '2207');
+  assert.equal(record.currency, 'USD');
+  assert.equal(record.amount, 4.99);
+  assert.equal(record.authCode, '883150');
+  assert.equal(record.reference, '626672883150');
+  assert.equal(record.postedAt, '2026-09-23T09:13:00-06:00');
+});
+
+test('a table row stays on one line', () => {
+  // Source HTML is pretty-printed, so the newlines between </td> and the next
+  // <td> will split a row in half unless they are collapsed. That split is
+  // what made this charge unreadable.
+  const text = htmlToText(BACMC);
+  assert.match(text, /^Comercio:\s*\|\s*APPLE\.COM\/BILL/m);
+  assert.match(text, /^MASTER:\s*\|\s*\*+2207/m);
+});
+
+test('a blank field does not swallow the label after it', () => {
+  // Some BAC charges carry an empty Referencia. Reading the following line
+  // there would file the next label as the reference.
+  const body = [
+    'Comercio:', 'MICROSOFT*', 'Ciudad y país:', 'REDMOND, US',
+    'Fecha:', 'Sep 23, 2026, 09:13', 'VISA:', '************4477',
+    'Autorización:', '123456', 'Referencia:', 'Tipo de Transacción:',
+    'COMPRA', 'Monto:', 'USD 9.99',
+  ].join('\n');
+  const { ok, record } = parseEmail({ from: BAC_FROM, subject: 'x', body });
+  assert.equal(ok, true);
+  assert.equal(record.reference, null, 'blank stays blank');
+  assert.equal(record.authCode, '123456');
+  assert.equal(record.amount, 9.99);
+});
+
+test('the older VISA layout still parses', () => {
+  const body = `Comercio: | AUTO MERCADO HEREDIA |
+Ciudad y país: | HEREDIA, Costa Rica |
+Fecha: | Sep 21, 2026 , 20:38 |
+VISA: | ***********4477 |
+Autorización: | 004411 |
+Referencia: | 626401991234 |
+Tipo de Transacción: | COMPRA |
+Monto: | CRC 38,500.00 |`;
+  const { ok, record } = parseEmail({ from: BAC_FROM, subject: 'x', body });
+  assert.equal(ok, true);
+  assert.equal(record.brand, 'visa');
+  assert.equal(record.last4, '4477');
+  assert.equal(record.amount, 38500);
 });

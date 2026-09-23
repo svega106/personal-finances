@@ -48,6 +48,19 @@ export const IGNORED_SENDERS = {
   'costarica_estadoscta@davivienda.cr': 'monthly statements',
 };
 
+/**
+ * A line that *starts* with a label: a few words then a colon. Used to stop a
+ * blank field from swallowing the field that follows it.
+ *
+ * Deliberately not anchored at the end. Depending on the rendering the next
+ * line may be the bare label ("Referencia:") or the whole pair
+ * ("Tipo de Transacción: COMPRA") — both mean "this is the next field, not
+ * my value". Only letters, spaces and slashes may precede the colon, so a
+ * value that happens to contain one, such as "Sep 23, 2026, 09:13", is not
+ * mistaken for a label.
+ */
+const LOOKS_LIKE_LABEL = /^[\p{L} /]{2,40}:/u;
+
 class ParseError extends Error {
   constructor(message, issuer) {
     super(message);
@@ -140,16 +153,38 @@ function cleanMerchant(raw) {
 
 function parseBac(body) {
   const t = normalize(body);
-  // Anchored per line, and horizontal whitespace only: a blank field such as
-  // "Referencia:" must read as empty, not swallow the following line.
+
+  /**
+   * A label with its value, whether they share a line or not.
+   *
+   * The same-line case is the table rendering. The next-line case is what
+   * some converters produce, splitting every cell onto its own line.
+   *
+   * The catch, and the reason this cannot simply take the following line: a
+   * BAC charge may carry a genuinely blank field — "Referencia:" with nothing
+   * after it, seen on MICROSOFT charges. Reading the next line there would
+   * hand back the *next label* as the reference. So a following line is only
+   * accepted when it is a value and not itself a label.
+   */
+  const clean = (v) => v.replace(/\|/g, ' ').trim();
   const field = (label) => {
-    const m = t.match(new RegExp(`^${label}\\s*:?[ \\t]*(.*)$`, 'im'));
-    const v = m ? m[1].trim() : '';
-    return v === '' ? null : v;
+    const m = t.match(new RegExp(`^${label}\\s*:?[ \\t|]*(.*)$`, 'im'));
+    if (!m) return null;
+
+    const same = clean(m[1]);
+    if (same) return same;
+
+    const next = t.slice(m.index + m[0].length)
+      .split('\n').map(clean).find((line) => line);
+    return next && !LOOKS_LIKE_LABEL.test(next) ? next : null;
   };
 
-  const brandLine = t.match(/^(VISA|AMEX|MASTERCARD)\s*:\s*([*\d]+)\s*$/im);
-  if (!brandLine) throw new ParseError('No card line', 'bac');
+  // BAC names the network rather than the brand: "MASTER:" not "MASTERCARD:".
+  const brandMatch = t.match(/^(VISA|AMEX|MASTERCARD|MASTER|MC)\s*:/im);
+  if (!brandMatch) throw new ParseError('No card line', 'bac');
+  const network = brandMatch[1].toUpperCase();
+  const cardDigits = field(network);
+  if (!cardDigits) throw new ParseError(`No card number after ${network}:`, 'bac');
 
   const kind = (field('Tipo de Transacci[oó]n') || 'COMPRA').toUpperCase();
   const money = need(field('Monto'), 'Monto', 'bac');
@@ -158,8 +193,8 @@ function parseBac(body) {
 
   return {
     issuer: 'bac',
-    brand: brandLine[1].toLowerCase(),
-    last4: last4(brandLine[2], 'bac'),
+    brand: network === 'MASTER' || network === 'MC' ? 'mastercard' : network.toLowerCase(),
+    last4: last4(cardDigits, 'bac'),
     merchantRaw: cleanMerchant(need(field('Comercio'), 'Comercio', 'bac')),
     city: field('Ciudad y pa[ií]s'),
     postedAt: dateEn(need(field('Fecha'), 'Fecha', 'bac'), 'bac'),
