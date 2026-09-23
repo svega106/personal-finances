@@ -15,6 +15,7 @@ export function createMemoryRepo(seed = {}) {
     fxRates: structuredClone(seed.fxRates ?? []),
     rules: structuredClone(seed.rules ?? []),
     transactions: structuredClone(seed.transactions ?? []),
+    snapshots: structuredClone(seed.snapshots ?? []),
   };
 
   let seq = 1;
@@ -70,6 +71,85 @@ export function createMemoryRepo(seed = {}) {
     async deleteTransaction(id) {
       const at = store.transactions.findIndex((x) => x.id === id);
       if (at >= 0) store.transactions.splice(at, 1);
+    },
+
+    /* ----------------------------------------------------------- balances */
+
+    async listAccountBalances() {
+      // Mirrors the `account_balances` view: last snapshot on or before today,
+      // plus every transaction posted after it.
+      return store.accounts.map((a) => {
+        const snaps = store.snapshots
+          .filter((s) => s.accountId === a.id)
+          .sort((x, y) => (x.asOf < y.asOf ? 1 : -1));
+        const last = snaps[0] ?? null;
+        const moved = store.transactions
+          .filter((t) => t.status !== 'voided'
+            && t.currency === a.currency
+            && (t.accountId === a.id || t.counterpartyAccountId === a.id)
+            && (!last || String(t.postedAt).slice(0, 10) > last.asOf))
+          .reduce((sum, t) => {
+            if (t.kind === 'income' || t.kind === 'adjustment') return sum + t.amount;
+            if (t.kind === 'transfer') {
+              return t.counterpartyAccountId === a.id ? sum + t.amount : sum - t.amount;
+            }
+            if (t.kind === 'expense') return sum - t.amount;
+            return sum;
+          }, 0);
+
+        const days = last
+          ? (Date.now() - new Date(`${last.asOf}T12:00:00Z`).getTime()) / 86400000
+          : null;
+
+        return {
+          accountId: a.id,
+          label: a.label,
+          type: a.type,
+          currency: a.currency,
+          snapshotDate: last?.asOf ?? null,
+          snapshotBalance: last ? last.balance : null,
+          currentBalance: (last ? last.balance : 0) + moved,
+          hasSnapshot: !!last,
+          stale: last ? days > 30 : null,
+          scope: a.scope || 'personal',
+        };
+      });
+    },
+
+    async listSnapshots(accountId, limit = 12) {
+      return structuredClone(store.snapshots)
+        .filter((s) => s.accountId === accountId)
+        .sort((a, b) => (a.asOf < b.asOf ? 1 : -1))
+        .slice(0, limit);
+    },
+
+    async saveSnapshot({ accountId, asOf, balance, currency, note }) {
+      const at = store.snapshots.findIndex(
+        (s) => s.accountId === accountId && s.asOf === asOf);
+      const row = { accountId, asOf, balance, currency, note: note || null };
+      if (at >= 0) { row.id = store.snapshots[at].id; store.snapshots[at] = row; }
+      else { row.id = `sn${seq++}`; store.snapshots.push(row); }
+    },
+
+    async deleteSnapshot(id) {
+      const at = store.snapshots.findIndex((s) => s.id === id);
+      if (at >= 0) store.snapshots.splice(at, 1);
+    },
+
+    async upsertAccount(a) {
+      const row = structuredClone(a);
+      row.type = row.type || 'savings';
+      row.currency = row.currency || 'CRC';
+      row.scope = row.scope || 'personal';
+      const at = row.id ? store.accounts.findIndex((x) => x.id === row.id) : -1;
+      if (at >= 0) store.accounts[at] = row;
+      else { row.id = row.id || `ac${seq++}`; store.accounts.push(row); }
+      return structuredClone(row);
+    },
+
+    async archiveAccount(id) {
+      const at = store.accounts.findIndex((x) => x.id === id);
+      if (at >= 0) store.accounts.splice(at, 1); // listAccounts returns active only
     },
 
     /** Test helper: what the repo currently holds. */

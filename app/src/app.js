@@ -3,6 +3,7 @@ import {
   DEFAULT_ALLOC, monthKey, monthLabel, shiftMonth, blankMonth, getMonth,
 } from './state.js';
 import { renderTransactions, updateNavBadge } from './views-tx.js';
+import { renderAccounts } from './views-accounts.js';
 import { loadMonth, cachedMonth } from './tx.js';
 
 let currentMonth = monthKey();
@@ -138,6 +139,7 @@ function updateHeader(){
     goals:["Savings Goals","Track progress toward your objectives"],
     annual:["Annual Review — "+annualYear,"Each month's highlights, year-to-date totals and trends"],
     transactions:["Transactions — "+monthLabel(currentMonth),"Everything spent this month, by day"],
+    accounts:["Accounts","What you have, what you owe, and what work owes you"],
     settings:["Settings","Customize your budgeting strategy"]
   };
   document.getElementById('viewTitle').textContent = titles[activeView][0];
@@ -159,6 +161,7 @@ export function render(){
   else if(activeView==='goals') renderGoals();
   else if(activeView==='annual') renderAnnual();
   else if(activeView==='transactions') renderTransactions(views, currentMonth);
+  else if(activeView==='accounts') renderAccounts(views, currentMonth);
   else if(activeView==='settings') renderSettings();
   renderMonthSelector();
 }

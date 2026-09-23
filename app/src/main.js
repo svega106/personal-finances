@@ -11,6 +11,7 @@ import {
   useCarryover, gotoMonth, stepYear,
 } from './app.js';
 import { txSetFilter, txEdit, txSave, txDelete, txRateModal } from './tx-actions.js';
+import { acctUpdate, acctAdd, acctMarkReimbursed } from './accounts-actions.js';
 import { loadReference, loadMonth } from './tx.js';
 import { updateNavBadge } from './views-tx.js';
 
@@ -43,6 +44,7 @@ function wire() {
     goalModal, saveGoal, delGoal, addToGoal, confirmAddGoal, updAlloc, liveAlloc, setAlloc,
     exportData, importData, resetAll, closeModal, updCarryover, useCarryover, gotoMonth, stepYear,
     txSetFilter, txEdit, txSave, txDelete, txRateModal,
+    acctUpdate, acctAdd, acctMarkReimbursed,
   });
 }
 

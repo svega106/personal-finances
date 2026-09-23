@@ -34,7 +34,7 @@ async function userId() {
  * compute engine already expects. Goals and settings are ordinary rows.
  */
 export function createSupabaseRepo() {
-  return extendWithTransactions({
+  return extendWithBalances(extendWithTransactions({
     async loadAll() {
       const uid = await userId();
 
@@ -127,7 +127,7 @@ export function createSupabaseRepo() {
         .upsert({ user_id: uid, data }, { onConflict: 'user_id' });
       if (error) boom('save settings', error);
     },
-  });
+  }));
 }
 
 /* ----------------------------------------------------------- transactions */
@@ -274,6 +274,113 @@ export function extendWithTransactions(repo) {
       const { error } = await supabase
         .from('transactions').delete().eq('user_id', uid).eq('id', id);
       if (error) boom('delete transaction', error);
+    },
+  });
+}
+
+
+/* -------------------------------------------------------------- balances */
+
+/**
+ * `account_balances` is a view: last manual snapshot, plus every transaction
+ * recorded since it. Savings balances are entered by hand because no bank
+ * emails a notification when one changes.
+ */
+function balanceFromRow(r) {
+  return {
+    accountId: r.account_id,
+    label: r.label,
+    type: r.type,
+    currency: r.currency,
+    snapshotDate: r.snapshot_date,
+    snapshotBalance: r.snapshot_balance == null ? null : Number(r.snapshot_balance),
+    currentBalance: Number(r.current_balance) || 0,
+    hasSnapshot: !!r.has_snapshot,
+    // null means "never snapshotted" — unknown, not fresh.
+    stale: r.snapshot_stale,
+    scope: r.scope,
+  };
+}
+
+export function extendWithBalances(repo) {
+  return Object.assign(repo, {
+    async listAccountBalances() {
+      const uid = await userId();
+      const { data, error } = await supabase
+        .from('account_balances')
+        .select('account_id, label, type, currency, snapshot_date, snapshot_balance,'
+              + ' current_balance, has_snapshot, snapshot_stale, scope')
+        .eq('user_id', uid);
+      if (error) boom('load balances', error);
+      return (data ?? []).map(balanceFromRow);
+    },
+
+    async listSnapshots(accountId, limit = 12) {
+      const uid = await userId();
+      const { data, error } = await supabase
+        .from('balance_snapshots')
+        .select('id, account_id, as_of, balance, currency, note')
+        .eq('user_id', uid).eq('account_id', accountId)
+        .order('as_of', { ascending: false }).limit(limit);
+      if (error) boom('load snapshots', error);
+      return (data ?? []).map((r) => ({
+        id: r.id, accountId: r.account_id, asOf: r.as_of,
+        balance: Number(r.balance) || 0, currency: r.currency, note: r.note,
+      }));
+    },
+
+    /** One snapshot per account per day — re-stating today's balance corrects it. */
+    async saveSnapshot({ accountId, asOf, balance, currency, note }) {
+      const uid = await userId();
+      const { error } = await supabase
+        .from('balance_snapshots')
+        .upsert({ user_id: uid, account_id: accountId, as_of: asOf,
+                  balance, currency, note: note || null },
+                { onConflict: 'user_id,account_id,as_of' });
+      if (error) boom('save balance', error);
+    },
+
+    async deleteSnapshot(id) {
+      const uid = await userId();
+      const { error } = await supabase
+        .from('balance_snapshots').delete().eq('user_id', uid).eq('id', id);
+      if (error) boom('delete balance', error);
+    },
+
+    async upsertAccount(a) {
+      const uid = await userId();
+      const row = {
+        user_id: uid,
+        label: a.label,
+        type: a.type || 'savings',
+        institution: a.institution ?? null,
+        default_currency: a.currency || 'CRC',
+        scope: a.scope || 'personal',
+        active: a.active === undefined ? true : !!a.active,
+        sort_order: a.sortOrder ?? 200,
+      };
+      if (a.id) row.id = a.id;
+      const { data, error } = await supabase
+        .from('accounts').upsert(row)
+        .select('id, label, type, issuer, institution, brand, last4, default_currency, scope, active, sort_order')
+        .single();
+      if (error) boom('save account', error);
+      return {
+        id: data.id, label: data.label, type: data.type, issuer: data.issuer,
+        institution: data.institution, brand: data.brand, last4: data.last4,
+        currency: data.default_currency, scope: data.scope,
+      };
+    },
+
+    /**
+     * Accounts are archived, never deleted: transactions and snapshots point
+     * at them, and history should not change because a card was closed.
+     */
+    async archiveAccount(id) {
+      const uid = await userId();
+      const { error } = await supabase
+        .from('accounts').update({ active: false }).eq('user_id', uid).eq('id', id);
+      if (error) boom('archive account', error);
     },
   });
 }

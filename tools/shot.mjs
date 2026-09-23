@@ -84,6 +84,55 @@ await page.addInitScript((seed) => {
     listAccounts: async () => clone(store.accounts),
     listRules: async () => clone(store.rules),
     listFxRates: async () => clone(store.fxRates || []),
+    // Kept in step with the real repo on purpose: a harness stub that is
+    // missing a method fails as a hung selector, not as an error.
+    listAccountBalances: async () => clone(store.accounts || []).map((a) => {
+      const snaps = (store.snapshots || [])
+        .filter((s) => s.accountId === a.id)
+        .sort((x, y) => (x.asOf < y.asOf ? 1 : -1));
+      const last = snaps[0] || null;
+      const moved = (store.transactions || [])
+        .filter((t) => t.status !== 'voided' && t.currency === a.currency
+          && (t.accountId === a.id || t.counterpartyAccountId === a.id)
+          && (!last || String(t.postedAt).slice(0, 10) > last.asOf))
+        .reduce((sum, t) => {
+          if (t.kind === 'income' || t.kind === 'adjustment') return sum + t.amount;
+          if (t.kind === 'transfer') return t.counterpartyAccountId === a.id ? sum + t.amount : sum - t.amount;
+          if (t.kind === 'expense') return sum - t.amount;
+          return sum;
+        }, 0);
+      return {
+        accountId: a.id, label: a.label, type: a.type, currency: a.currency,
+        snapshotDate: last ? last.asOf : null,
+        snapshotBalance: last ? last.balance : null,
+        currentBalance: (last ? last.balance : 0) + moved,
+        hasSnapshot: !!last, stale: last ? false : null, scope: a.scope || 'personal',
+      };
+    }),
+    listSnapshots: async (accountId) => clone(store.snapshots || [])
+      .filter((s) => s.accountId === accountId),
+    saveSnapshot: async ({ accountId, asOf, balance, currency, note }) => {
+      store.snapshots = store.snapshots || [];
+      const at = store.snapshots.findIndex((s) => s.accountId === accountId && s.asOf === asOf);
+      const row = { id: 'sn' + (seq++), accountId, asOf, balance, currency, note: note || null };
+      if (at >= 0) { row.id = store.snapshots[at].id; store.snapshots[at] = row; }
+      else store.snapshots.push(row);
+    },
+    deleteSnapshot: async (id) => {
+      const at = (store.snapshots || []).findIndex((s) => s.id === id);
+      if (at >= 0) store.snapshots.splice(at, 1);
+    },
+    upsertAccount: async (a) => {
+      const row = clone(a);
+      const at = row.id ? store.accounts.findIndex((x) => x.id === row.id) : -1;
+      if (at >= 0) store.accounts[at] = row;
+      else { row.id = row.id || ('ac' + (seq++)); store.accounts.push(row); }
+      return clone(row);
+    },
+    archiveAccount: async (id) => {
+      const at = store.accounts.findIndex((x) => x.id === id);
+      if (at >= 0) store.accounts.splice(at, 1);
+    },
     saveFxRate: async ({ month, currency, rate }) => {
       store.fxRates = store.fxRates || [];
       const at = store.fxRates.findIndex((x) => x.month === month && x.currency === currency);

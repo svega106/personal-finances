@@ -299,3 +299,38 @@
   .tx-unconv{color:var(--invest)}
   .btn.sm{padding:7px 12px;font-size:13px}
   @media (max-width:640px){ .tx-pending{flex-direction:column;align-items:stretch} }
+
+/* ------------------------------------------------------------- accounts */
+
+/* `.section-title` is already defined above; this only adds the variant that
+   carries an action button on the right. */
+.section-title.spread{justify-content:space-between}
+
+.acct-note{font-size:12.5px;line-height:1.55;margin:0 0 12px;max-width:62ch}
+
+.acct-list{padding:4px 0}
+
+.acct-row{display:flex;align-items:center;gap:14px;padding:13px 18px;
+  border-bottom:1px solid var(--line)}
+.acct-row:last-child{border-bottom:none}
+
+.acct-main{flex:1;min-width:0}
+.acct-name{font-weight:550;font-size:14px}
+.acct-meta{font-size:12px;margin-top:3px;display:flex;align-items:center;gap:8px}
+
+.acct-amt{text-align:right;font-variant-numeric:tabular-nums;font-weight:600;
+  font-size:15px;white-space:nowrap}
+.acct-crc{display:block;font-size:11.5px;font-weight:500;color:var(--muted);
+  margin-top:2px}
+
+.acct-flag{font-size:11px;padding:2px 8px;border-radius:999px;font-weight:600}
+.acct-never{background:rgba(138,152,172,.14);color:var(--muted)}
+.acct-stale{background:rgba(251,191,36,.14);color:var(--warn)}
+.acct-when{font-size:12px}
+
+.acct-actions{justify-content:flex-end;gap:10px}
+
+@media (max-width:720px){
+  .acct-row{padding:12px 14px;gap:10px}
+  .acct-amt{font-size:14px}
+}
