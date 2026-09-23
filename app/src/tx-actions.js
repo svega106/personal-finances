@@ -7,6 +7,7 @@
 import { openModal, closeModal, toast, render } from './app.js';
 import { getAccounts, accountById, matchRule, saveTransaction, removeTransaction, loadMonth, rateFor, setMonthRate, budgetLines } from './tx.js';
 import { getMonth, money } from './state.js';
+import { initialReimbursement } from './work.js';
 import { findRow, blankTx, CATS, esc, updateNavBadge } from './views-tx.js';
 import { txFilters } from './views-tx.js';
 
@@ -76,7 +77,7 @@ function sheet(t) {
       <div class="field"><label>Scope</label>
         <select class="inp" id="tx_scope">
           <option value="personal"${t.scope === 'personal' ? ' selected' : ''}>Personal</option>
-          <option value="work"${t.scope === 'work' ? ' selected' : ''}>Work (reimbursable)</option>
+          <option value="work"${t.scope === 'work' ? ' selected' : ''}>Work</option>
         </select></div>
     </div>
 
@@ -186,10 +187,11 @@ export async function txSave() {
     reviewed: true,
   };
 
-  // A transaction on the work card is reimbursable by default.
-  if (t.scope === 'work' && !t.reimbursement) {
-    t.reimbursement = { status: 'pending' };
-  } else if (t.scope === 'personal') {
+  // Marking something as work only makes it reimbursable when the money was
+  // yours: a charge on the company's own card is theirs to settle.
+  if (t.scope === 'work') {
+    if (!t.reimbursement) t.reimbursement = initialReimbursement(accountById(t.accountId));
+  } else {
     t.reimbursement = null;
   }
 

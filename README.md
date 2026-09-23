@@ -134,6 +134,22 @@ to verify.
    `…90Days`) instead. Those wrappers exist because the Run button cannot pass
    an argument.
 
+### Work expenses
+
+Two different things, kept apart:
+
+- **The BNCR card is the company's.** They pay it directly, so that money
+  never leaves your pocket. Those charges are excluded from personal spending
+  and never appear as owed — they are listed under "paid by the company" for
+  reference only.
+- **A work expense on one of your own cards** is your money until it comes
+  back. Open the charge on the Transactions tab, set Scope to *Work*, and it
+  appears under **Work — owed to you** in Accounts, whatever card it was on
+  and whatever month it was.
+
+Which of the two a charge is gets derived from the card it sits on, not
+stored on the charge, so moving a charge to a different card corrects it.
+
 Charges arrive **unreviewed**, so they show in the app's review badge until
 you have looked at them. A re-run never overwrites a charge you have already
 edited — the write ignores rows whose `ext_id` is already present.

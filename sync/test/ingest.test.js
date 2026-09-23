@@ -122,9 +122,24 @@ test('an unmatched merchant is left uncategorized rather than guessed', () => {
   assert.equal(row.merchant, row.merchant_raw);
 });
 
-test('the work card makes a charge reimbursable whatever was bought', () => {
+test('the work card marks a charge as work whatever was bought', () => {
   const row = ingest(BNCR_WORK);
   assert.equal(row.account_id, 'bncr-usd', 'a USD voucher belongs to the dollar half');
+  assert.equal(row.scope, 'work');
+});
+
+test('a charge on the company card is not awaiting reimbursement', () => {
+  // The company pays that card directly, so the money never left his pocket
+  // and there is nothing to claim back.
+  assert.equal(ingest(BNCR_WORK).reimbursement, null);
+});
+
+test('a work charge on a personal card is awaiting reimbursement', () => {
+  // The same rule from the other side: his money until it comes back. The
+  // scope is set by hand in the app, which the ingest respects.
+  const rules = [{ id: 'rw', pattern: 'AUTO MERCADO', matchType: 'contains', priority: 1,
+    cat: 'needs', budgetLineId: null, scope: 'work', merchantClean: null }];
+  const row = ingest(BAC_CRC, { rules, accounts: [] });
   assert.equal(row.scope, 'work');
   assert.deepEqual(row.reimbursement, { status: 'pending' });
 });

@@ -35,7 +35,13 @@ export function toTransactionRow({ record: r, hit, account, userId }) {
     account_id: account?.id ?? null,
     counterparty_account_id: null,
     scope,
-    reimbursement: scope === 'work' ? { status: 'pending' } : null,
+    // Only money that left your own pocket is awaiting reimbursement. A
+    // charge on the company's own card (a work-scope account) is theirs to
+    // settle, so it is recorded without ever being chased. A work expense put
+    // on a personal card is the opposite, and starts as pending.
+    reimbursement: scope === 'work' && account?.scope !== 'work'
+      ? { status: 'pending' }
+      : null,
     cat: hit?.cat ?? null,
     budget_line_id: hit?.budgetLineId ?? null,
     source: 'email',

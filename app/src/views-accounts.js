@@ -12,9 +12,9 @@
  */
 import { money } from './state.js';
 import { getRepo } from './repo.js';
-import { rateFor } from './tx.js';
+import { rateFor, accountById } from './tx.js';
 import { esc, dayKey, dayLabel } from './views-tx.js';
-import { workFor, splitWork, totalByCurrency, isReimbursed } from './work.js';
+import { workFor, splitWork, totalByCurrency, isReimbursed, isCompanyPaid } from './work.js';
 
 /**
  * Lets the actions module force a repaint once a settle has landed. Declared
@@ -216,43 +216,43 @@ function workSection() {
     <div class="card"><p class="muted" style="font-size:13px">Loading work charges…</p></div>`;
   }
 
-  const { outstanding, settled } = splitWork(rows);
-  const owed = totalByCurrency(outstanding);
-  // Colones and dollars are never added together here: the two balances are
-  // settled separately, and the month's rate has nothing to do with what work
-  // owes you.
-  const amounts = Object.entries(owed)
+  const { owed, settled, companyPaid } = splitWork(rows);
+  const total = totalByCurrency(owed);
+  // Colones and dollars are never added together: the two balances settle
+  // separately, and what work owes you has nothing to do with the month's rate.
+  const amounts = Object.entries(total)
     .sort(([a], [b]) => (a === 'CRC' ? -1 : b === 'CRC' ? 1 : a.localeCompare(b)))
     .map(([cur, v]) => fmt(v, cur))
     .join(' + ');
 
   return `
   <div class="section-title spread" style="margin-top:26px">
-    <span>Work — reimbursable</span>
-    ${outstanding.length ? `<span class="muted" style="font-size:13px;font-weight:500">
+    <span>Work — owed to you</span>
+    ${owed.length ? `<span class="muted" style="font-size:13px;font-weight:500">
       ${esc(amounts)} outstanding</span>` : ''}
   </div>
   <p class="muted acct-note">
-    Charges on the BNCR card, from any month — reimbursement usually arrives
-    later than the charge. They are excluded from your personal spending.
+    Work spending you paid for yourself, on any card and from any month —
+    reimbursement usually arrives later than the charge. Mark a charge as Work
+    on the Transactions tab and it appears here.
   </p>
 
-  ${outstanding.length ? `
+  ${owed.length ? `
   <div class="card acct-list">
     <div class="work-head">
       <label class="tx-check">
         <input type="checkbox" id="work_all" onchange="acctSelectAllWork(this.checked)"
-               ${allSelected(outstanding) ? 'checked' : ''}>
+               ${allSelected(owed) ? 'checked' : ''}>
         <span>${selectedCount() ? `${selectedCount()} selected` : 'Select all'}</span>
       </label>
       <button class="btn sm" ${selectedCount() ? '' : 'disabled'}
               onclick="acctSettleSelected()">Mark reimbursed</button>
     </div>
-    ${outstanding.map(workRow).join('')}
+    ${owed.map(workRow).join('')}
   </div>` : `
   <div class="card" style="text-align:center;padding:30px 20px">
     <p class="muted" style="font-size:13px;margin:0">
-      Nothing outstanding. Every work charge has been reimbursed.</p>
+      Nothing owed to you. Work expenses you pay for yourself show up here.</p>
   </div>`}
 
   ${settled.length ? `
@@ -260,6 +260,19 @@ function workSection() {
     <summary>${settled.length} already reimbursed</summary>
     <div class="card acct-list">
       ${settled.slice(0, 40).map(workRow).join('')}
+    </div>
+  </details>` : ''}
+
+  ${companyPaid.length ? `
+  <details class="work-settled">
+    <summary>${companyPaid.length} paid by the company</summary>
+    <p class="muted acct-note" style="margin-top:8px">
+      Charges on the BNCR card. The company pays that card directly, so these
+      never come out of your pocket and there is nothing to claim back. They
+      are kept out of your personal spending and listed here for reference.
+    </p>
+    <div class="card acct-list">
+      ${companyPaid.slice(0, 40).map(workRow).join('')}
     </div>
   </details>` : ''}`;
 }
@@ -269,20 +282,25 @@ function workRow(t) {
   // dayKey, not a slice of the timestamp: Postgres returns UTC, so an evening
   // charge slices to the following date. Same bug the ledger had.
   const when = dayLabel(dayKey(t.postedAt));
+  const company = isCompanyPaid(t);
+  const acct = accountById(t.accountId);
+
   return `
-  <div class="acct-row work-row${done ? ' work-done' : ''}">
-    ${done ? '' : `<input type="checkbox" class="work-pick" ${selected.has(t.id) ? 'checked' : ''}
+  <div class="acct-row work-row${done || company ? ' work-done' : ''}">
+    ${done || company ? '' : `<input type="checkbox" class="work-pick" ${selected.has(t.id) ? 'checked' : ''}
             onchange="acctPickWork('${esc(t.id)}',this.checked)">`}
     <div class="acct-main">
       <div class="acct-name">${esc(t.merchant || t.merchantRaw || '(no merchant)')}</div>
       <div class="acct-meta muted">
-        ${esc(when)}${t.reimbursement?.on ? ` · reimbursed ${esc(dayLabel(t.reimbursement.on))}` : ''}
+        ${esc(when)}${acct ? ` · ${esc(acct.label)}` : ''}${t.reimbursement?.on ? ` · reimbursed ${esc(dayLabel(t.reimbursement.on))}` : ''}
       </div>
     </div>
     <div class="acct-amt"><div>${fmt(t.amount, t.currency)}</div></div>
-    ${done
-      ? `<button class="btn ghost sm" onclick="acctUnsettle('${esc(t.id)}')">Undo</button>`
-      : `<button class="btn ghost sm" onclick="acctSettleOne('${esc(t.id)}')">Settle</button>`}
+    ${company
+      ? '<span class="work-tag">company</span>'
+      : done
+        ? `<button class="btn ghost sm" onclick="acctUnsettle('${esc(t.id)}')">Undo</button>`
+        : `<button class="btn ghost sm" onclick="acctSettleOne('${esc(t.id)}')">Settle</button>`}
   </div>`;
 }
 
@@ -293,16 +311,17 @@ const selected = new Set();
 export function workSelected() { return selected; }
 export function selectedCount() { return selected.size; }
 
-function allSelected(outstanding) {
-  return outstanding.length > 0 && outstanding.every((t) => selected.has(t.id));
+function allSelected(owed) {
+  return owed.length > 0 && owed.every((t) => selected.has(t.id));
 }
 
 /** Only outstanding charges can be picked; a settled one has nothing to settle. */
 export function setAllWorkSelected(on) {
   selected.clear();
   if (on) {
-    const { outstanding } = splitWork(cachedWorkRows());
-    for (const t of outstanding) selected.add(t.id);
+    // Only what is actually owed: a company-paid charge has nothing to settle.
+    const { owed } = splitWork(cachedWorkRows());
+    for (const t of owed) selected.add(t.id);
   }
 }
 

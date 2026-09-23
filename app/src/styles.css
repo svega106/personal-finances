@@ -392,3 +392,9 @@
 .btn:disabled,.btn:disabled:hover{opacity:.42;cursor:not-allowed;
   background:var(--surface2);color:var(--muted);box-shadow:none}
 .btn.ghost:disabled{background:transparent;border-color:var(--line)}
+
+/* A charge the company paid has nothing to settle — the tag says so where a
+   button would otherwise be. */
+.work-tag{font-size:10.5px;text-transform:uppercase;letter-spacing:.6px;
+  font-weight:700;color:var(--faint);border:1px solid var(--line);
+  border-radius:999px;padding:4px 9px;white-space:nowrap}
