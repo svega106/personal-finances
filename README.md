@@ -65,15 +65,31 @@ to verify.
 
 ### Setting it up
 
-1. **Deploy the function.** From the repo root:
+1. **Deploy the function.** In a terminal, in the repo root — the same place
+   you run `git push`. The first two commands are one-time setup; only the
+   third is repeated when the function changes.
 
    ```
+   npx supabase login                                  # opens a browser
+   npx supabase link --project-ref zemxydjuuugzumxjrpqf
    npx supabase functions deploy ingest-email --no-verify-jwt
    ```
+
+   `link` writes `supabase/config.toml` and asks for the database password —
+   the one set when the project was created, not the Supabase account
+   password. It is only needed once.
 
    `--no-verify-jwt` is deliberate: the caller is a script, not a signed-in
    person, so there is no user JWT to check. The shared secret below is the
    authentication.
+
+   On Windows, if PowerShell refuses with *"npx.ps1 cannot be loaded ... not
+   digitally signed"*, use `npx.cmd` in place of `npx`, or allow local scripts
+   once with:
+
+   ```
+   Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+   ```
 
 2. **Set the secret.** Invent a long random string. In the Supabase dashboard,
    Edge Functions → Secrets, add `INGEST_SECRET`. `SUPABASE_URL` and
