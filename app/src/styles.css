@@ -140,7 +140,13 @@
   .modal{background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:24px;width:100%;max-width:440px;box-shadow:var(--shadow)}
   .modal h3{margin:0 0 16px;font-size:18px}
   .modal .actions{display:flex;gap:10px;justify-content:flex-end;margin-top:20px}
-  .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--surface2);border:1px solid var(--line);color:var(--text);padding:12px 20px;border-radius:12px;box-shadow:var(--shadow);opacity:0;transition:.3s;z-index:99;font-size:14px;font-weight:600}
+  /* pointer-events:none is load-bearing, not a nicety. The toast is always in
+     the DOM, sits at bottom:24px above everything at z-99, and keeps its text
+     after the first message — so at opacity:0 it is an invisible box that
+     still swallows taps. On a phone that lands exactly on a modal's Cancel
+     and Save buttons, which stop responding with nothing visible to explain
+     why. A toast is never something you tap, even while it is showing. */
+  .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--surface2);border:1px solid var(--line);color:var(--text);padding:12px 20px;border-radius:12px;box-shadow:var(--shadow);opacity:0;transition:.3s;z-index:99;font-size:14px;font-weight:600;pointer-events:none}
   .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
   .hidden{display:none!important}
   .seg{display:inline-flex;background:var(--surface2);border:1px solid var(--line);border-radius:10px;padding:3px}
@@ -284,6 +290,20 @@
     .stat{font-size:23px}
 
     .modal{max-height:88dvh; overflow-y:auto}
+
+    /* On a phone the taller sheets — adding an expense, with its budget-line
+       picker — run past the bottom of a scrollable dialog, leaving Cancel and
+       Save below the fold with nothing to suggest they are there. Pin the
+       action row so it is always in reach. */
+    .modal .actions{
+      position:sticky; bottom:-24px; margin-top:16px;
+      padding:12px 0 6px; background:var(--surface);
+      box-shadow:0 -10px 14px -8px var(--surface);
+    }
+
+    /* Clear of the bottom tab bar, so a toast is not half-hidden behind it. */
+    .toast{bottom:calc(72px + env(safe-area-inset-bottom)); max-width:calc(100vw - 32px);
+      text-align:center}
   }
 
   /* Two stat cards per row is still readable on a large phone. */

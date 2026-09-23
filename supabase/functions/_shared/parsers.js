@@ -13,6 +13,8 @@
  * caller logs the email for review rather than storing a half-read charge.
  */
 
+import { htmlToText } from './html-to-text.js';
+
 const TZ = '-06:00'; // America/Costa_Rica, no DST
 
 const MONTHS_EN = {
@@ -181,7 +183,12 @@ function parseDavivienda(body) {
   const m = t.match(
     // "en Colones por 42,239.00" | "en Dolares US por 18.75" — the currency is a
     // word, and the USD form carries a trailing "US".
-    /realizada en:\s*(.+?),\s*el\s*(\d{2})\/(\d{2})\/(\d{4}),\s*a las\s*(\d{1,2}):(\d{2}),\s*con la tarjeta\s*(.+?)\s*terminada en\s*\*?(\d{4}),\s*Autorizaci[oó]n\s*#?\s*(\d+),\s*Ref\s*#?\s*(\d+),\s*en\s+(Colones|D[oó]lares)(?:\s+US)?\s+por\s+([\d.,]+)/i,
+    //
+    // Every comma allows whitespace in front of it. Davivienda wraps each
+    // field in <strong>, so a converter that turns a tag into a space yields
+    // "23/09/2026 , a las" — which is what made every one of these charges
+    // fail to import while the sync reported success.
+    /realizada en:\s*(.+?)\s*,\s*el\s*(\d{2})\/(\d{2})\/(\d{4})\s*,\s*a las\s*(\d{1,2}):(\d{2})\s*,\s*con la tarjeta\s*(.+?)\s*terminada en\s*\*?(\d{4})\s*,\s*Autorizaci[oó]n\s*#?\s*(\d+)\s*,\s*Ref\s*#?\s*(\d+)\s*,\s*en\s+(Colones|D[oó]lares)(?:\s+US)?\s+por\s+([\d.,]+)/i,
   );
   if (!m) throw new ParseError('Sentence did not match', 'davivienda');
 
@@ -288,10 +295,16 @@ export function extId(r) {
 /**
  * Parse one email.
  *
- * Returns { ok: true, record } | { ok: false, reason, detail }.
+ * Returns { ok: true, record } | { ok: false, reason, detail, sample }.
  * Never throws: the caller decides what to do with an unreadable email.
+ *
+ * Two renderings are tried. The plain-text body is whatever the fetcher
+ * produced — for Apps Script that is `getPlainBody()`, a black box that
+ * varies by how the bank builds its HTML. If that fails and the raw HTML was
+ * sent too, the HTML is converted here, by code that is under test, and tried
+ * again. One bank's layout should not be able to break the import silently.
  */
-export function parseEmail({ from, subject = '', body = '' }) {
+export function parseEmail({ from, subject = '', body = '', html = '' }) {
   const addr = String(from || '').toLowerCase().match(/[\w.+-]+@[\w.-]+/)?.[0] || '';
 
   if (IGNORED_SENDERS[addr]) {
@@ -302,25 +315,54 @@ export function parseEmail({ from, subject = '', body = '' }) {
   if (!issuer) return { ok: false, reason: 'unknown-sender', detail: addr };
 
   // Promerica and BNCR use one sender for marketing as well as vouchers.
-  if (issuer === 'promerica' && !/transacci[oó]n/i.test(subject) && !/Tipo de Comercio/i.test(body)) {
+  const anyText = `${body}\n${html}`;
+  if (issuer === 'promerica' && !/transacci[oó]n/i.test(subject) && !/Tipo de Comercio/i.test(anyText)) {
     return { ok: false, reason: 'not-a-transaction', detail: subject };
   }
-  if (issuer === 'bncr' && !/NRO\.?\s*AUT/i.test(body)) {
+  if (issuer === 'bncr' && !/NRO\.?\s*AUT/i.test(anyText)) {
     return { ok: false, reason: 'not-a-transaction', detail: subject };
   }
 
-  try {
-    const record = PARSERS[issuer](body);
-    record.extId = extId(record);
-    record.amountCrc = record.currency === 'CRC' ? record.amount : null; // FX applied by caller
-    record.scope = record.issuer === 'bncr' ? 'work' : 'personal';
-    record.source = 'email';
-    record.method = 'card';
-    record.status = 'pending';
-    return { ok: true, record };
-  } catch (err) {
-    return { ok: false, reason: 'parse-error', detail: err.message, issuer };
+  const candidates = [];
+  if (body) candidates.push({ label: 'plain', text: body });
+  if (html) candidates.push({ label: 'html', text: htmlToText(html) });
+  if (!candidates.length) return { ok: false, reason: 'empty', detail: 'no body' };
+
+  let lastErr = null;
+  for (const c of candidates) {
+    try {
+      const record = PARSERS[issuer](c.text);
+      record.extId = extId(record);
+      record.amountCrc = record.currency === 'CRC' ? record.amount : null; // FX applied by caller
+      record.scope = record.issuer === 'bncr' ? 'work' : 'personal';
+      record.source = 'email';
+      record.method = 'card';
+      record.status = 'pending';
+      return { ok: true, record, via: c.label };
+    } catch (err) {
+      lastErr = { err, c };
+    }
   }
+
+  // A parse error with no sample of what was read is undiagnosable — the only
+  // way to find out is to go and fetch the email by hand. Send back enough to
+  // see the shape of it.
+  return {
+    ok: false,
+    reason: 'parse-error',
+    detail: lastErr.err.message,
+    issuer,
+    sample: excerpt(lastErr.c.text),
+    tried: candidates.map((c) => c.label),
+  };
+}
+
+/** A readable slice around whatever the parser was looking for. */
+function excerpt(text, len = 260) {
+  const t = normalize(text).replace(/\n/g, ' ⏎ ');
+  const anchor = t.search(/realizada en|Comercio|NRO\.?\s*AUT|Tipo de Comercio|Monto/i);
+  const from = anchor > 60 ? anchor - 60 : 0;
+  return (from ? '…' : '') + t.slice(from, from + len) + (t.length > from + len ? '…' : '');
 }
 
 export const _internal = { normalize, toAmount, dateEn, dateEs, cleanMerchant };

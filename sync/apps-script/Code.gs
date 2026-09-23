@@ -81,13 +81,18 @@ function syncNow() {
       var epoch = Math.floor(m.getDate().getTime() / 1000);
       if (epoch < since - 1) continue; // older message on a thread that was bumped
 
+      // Both renderings go over. getPlainBody() is Apps Script's own
+      // conversion — a black box that differs per bank layout and cannot be
+      // covered by a test here. The raw HTML lets the server convert it with
+      // code that is under test, and try again if the plain text will not
+      // parse. A Davivienda charge went missing for days because only the
+      // first of these was sent.
       messages.push({
         id: m.getId(),
         from: m.getFrom(),
         subject: m.getSubject(),
-        // Plain text where the bank sends it; otherwise the HTML stripped down.
-        // The parsers normalize both shapes to the same thing.
-        body: m.getPlainBody() || htmlToText(m.getBody())
+        body: m.getPlainBody(),
+        html: trimHtml(m.getBody())
       });
       if (epoch > newest) newest = epoch;
     }
@@ -116,10 +121,39 @@ function syncNow() {
   }
 
   PROPS.setProperty(WATERMARK, String(newest));
-  Logger.log('Sent ' + messages.length + ' message(s). Response: ' + text.slice(0, 500));
+
+  // Say plainly what happened. A run that sends five charges and imports none
+  // used to read as a success, because the POST returned 200.
+  var summary;
+  try {
+    var r = JSON.parse(text);
+    var failed = (r.skipped || []).filter(function (s) { return s.reason === 'parse-error'; });
+    summary = 'sent ' + messages.length + ', imported ' + r.imported
+            + ', duplicates ' + r.duplicates;
+    if (r.unmatchedAccount) summary += ', ' + r.unmatchedAccount + ' with no matching card';
+    if (failed.length) {
+      summary += '\n*** ' + failed.length + ' COULD NOT BE PARSED — those charges are not in the app:';
+      failed.forEach(function (f) {
+        summary += '\n    ' + (f.issuer || '?') + ': ' + f.detail + '\n      saw: ' + (f.sample || '(no sample)');
+      });
+    }
+  } catch (e) {
+    summary = 'Sent ' + messages.length + '. Raw response: ' + text.slice(0, 500);
+  }
+  Logger.log(summary);
 }
 
-/** Crude but adequate: the parsers only need readable text and line breaks. */
+/**
+ * Keep the payload sane: drop inline image data and cap the length. Bank
+ * notification markup is small once the base64 is gone, and the sentence the
+ * parsers need is always near the top.
+ */
+function trimHtml(html) {
+  var s = String(html || '').replace(/src="data:[^"]*"/gi, 'src=""');
+  return s.length > 120000 ? s.slice(0, 120000) : s;
+}
+
+/** Kept only for resilience if a bank ever sends no HTML at all. */
 function htmlToText(html) {
   return String(html || '')
     .replace(/<style[\s\S]*?<\/style>/gi, '')

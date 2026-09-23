@@ -41,7 +41,7 @@ const json = (body: unknown, status = 200) =>
     status, headers: { 'content-type': 'application/json' },
   });
 
-type Incoming = { id?: string; from: string; subject?: string; body?: string };
+type Incoming = { id?: string; from: string; subject?: string; body?: string; html?: string };
 
 Deno.serve(async (req: Request) => {
   if (req.method !== 'POST') return json({ error: 'POST only' }, 405);
@@ -102,11 +102,19 @@ Deno.serve(async (req: Request) => {
   const skipped: Record<string, unknown>[] = [];
 
   for (const m of messages) {
-    const parsed = parseEmail({ from: m.from, subject: m.subject ?? '', body: m.body ?? '' });
+    const parsed = parseEmail({
+      from: m.from, subject: m.subject ?? '', body: m.body ?? '', html: m.html ?? '',
+    });
     if (!parsed.ok) {
       // 'ignored' and 'unknown-sender' are routine — the mailbox holds plenty
       // that is not a charge. A parse-error is not routine and is reported.
-      skipped.push({ id: m.id, reason: parsed.reason, detail: parsed.detail });
+      skipped.push({
+        id: m.id, reason: parsed.reason, detail: parsed.detail,
+        // Only a parse failure needs evidence; an ignored sender does not.
+        ...(parsed.reason === 'parse-error'
+          ? { issuer: parsed.issuer, sample: parsed.sample, tried: parsed.tried }
+          : {}),
+      });
       continue;
     }
 
