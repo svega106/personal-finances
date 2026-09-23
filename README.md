@@ -101,8 +101,12 @@ to verify.
 
    | Key | Value |
    | --- | --- |
-   | `INGEST_URL` | `https://<project-ref>.supabase.co/functions/v1/ingest-email` |
+   | `INGEST_URL` | `https://zemxydjuuugzumxjrpqf.supabase.co/functions/v1/ingest-email` |
    | `INGEST_SECRET` | the same string as above |
+
+   That is the real URL for this project, not a template — paste it as it is.
+   The ref is not a secret; it is already in the frontend bundle. What
+   protects the endpoint is `INGEST_SECRET`.
 
 4. **Authorize.** Save the file (Ctrl+S — the editor only lists saved
    functions). In the toolbar above the code, pick **`setUp`** from the

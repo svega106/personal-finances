@@ -48,6 +48,19 @@ function syncNow() {
   var secret = PROPS.getProperty('INGEST_SECRET');
   if (!url || !secret) throw new Error('Set INGEST_URL and INGEST_SECRET in Script properties.');
 
+  // UrlFetchApp reports a placeholder left in the URL as "Invalid argument",
+  // which says nothing about the cause. Catch it here and say what to fix.
+  if (url.indexOf('<') !== -1 || url.indexOf('>') !== -1) {
+    throw new Error(
+      'INGEST_URL still contains a placeholder: ' + url + '\n' +
+      'Replace it with your project ref, e.g. ' +
+      'https://abcdefghijklm.supabase.co/functions/v1/ingest-email\n' +
+      '(Supabase dashboard -> Project Settings -> General -> Reference ID)');
+  }
+  if (url.indexOf('/functions/v1/ingest-email') === -1) {
+    throw new Error('INGEST_URL should end in /functions/v1/ingest-email, got: ' + url);
+  }
+
   var since = Number(PROPS.getProperty(WATERMARK) || 0);
   if (!since) since = Math.floor(Date.now() / 1000) - 30 * 86400;
 
