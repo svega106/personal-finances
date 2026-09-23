@@ -40,9 +40,14 @@ cd sync/edge-test && deno run --allow-net --allow-env --allow-read handler.test.
 Browser-level checks live in `tools/` and need the app running:
 
 ```
-node tools/smoke.mjs    http://localhost:4173/   # the five original views
-node tools/tx-smoke.mjs http://localhost:4173/   # the transactions view
+node tools/smoke.mjs    http://localhost:4173/            # the five original views
+node tools/tx-smoke.mjs http://localhost:4173/            # the transactions view
+node tools/pwa-check.mjs http://localhost:4173/ app/dist  # install, offline, update
 ```
+
+`pwa-check.mjs` needs the build directory as well as the URL: proving that an
+update reaches an installed app means publishing one, so it edits the served
+files and puts them back.
 
 
 ## How charges get in
@@ -134,3 +139,24 @@ you have looked at them. A re-run never overwrites a charge you have already
 edited — the write ignores rows whose `ext_id` is already present.
 
 To re-import after fixing a parser, run `resyncLast7Days` in the script.
+
+
+## Installing it on a phone
+
+The app is a PWA, so it installs to a home screen and opens without browser
+chrome.
+
+- **Android / Chrome** — open the site, menu ⋮ → *Add to Home screen*, or take
+  the install prompt when Chrome offers one.
+- **iOS / Safari** — Share → *Add to Home Screen*. Safari does not offer a
+  prompt, and only Safari can install; Chrome on iOS cannot.
+
+`app/public/sw.js` caches the app shell and its hashed assets so it opens
+instantly. It deliberately does **not** cache anything from Supabase. The data
+is the whole point of the app, and a budget quietly showing yesterday's
+numbers is worse than a screen that admits it is offline. Opened with no
+network, the app loads and then reports that it cannot reach your data.
+
+Bump `VERSION` in `sw.js` if the cached shell ever needs to be thrown away
+deliberately. Ordinary deploys do not need it — navigations are network-first,
+so a running app picks up a new build as soon as it is online.

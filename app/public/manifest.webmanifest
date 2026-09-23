@@ -1,0 +1,21 @@
+{
+  "name": "Personal Finance Advisor",
+  "short_name": "Finances",
+  "description": "Monthly budget and card spending, in colones and dollars.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#0f1419",
+  "theme_color": "#0f1419",
+  "lang": "en",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Transactions", "url": "/?view=transactions", "description": "This month's charges" },
+    { "name": "Accounts", "url": "/?view=accounts", "description": "Balances and what you owe" }
+  ]
+}

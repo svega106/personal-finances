@@ -102,3 +102,30 @@ async function boot() {
 }
 
 boot();
+
+/* --------------------------------------------------------- installability */
+
+/**
+ * Register the service worker, which is what makes the app installable and
+ * makes it open instantly on a phone.
+ *
+ * Registered after boot rather than before: if it ever went wrong, it must
+ * not be able to stop the app loading. It is also skipped on the dev server,
+ * where a cached shell only gets in the way of the file you just edited.
+ */
+if ('serviceWorker' in navigator && !import.meta.env.DEV) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').then((reg) => {
+      // A new build is live. Take it on the next launch rather than swapping
+      // the page out from under someone mid-edit.
+      reg.addEventListener('updatefound', () => {
+        const installing = reg.installing;
+        installing?.addEventListener('statechange', () => {
+          if (installing.state === 'installed' && navigator.serviceWorker.controller) {
+            installing.postMessage('skip-waiting');
+          }
+        });
+      });
+    }).catch((err) => console.warn('[sw]', err.message));
+  });
+}
