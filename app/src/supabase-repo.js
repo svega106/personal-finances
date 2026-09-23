@@ -319,6 +319,7 @@ function balanceFromRow(r) {
     // null means "never snapshotted" — unknown, not fresh.
     stale: r.snapshot_stale,
     scope: r.scope,
+    pendingFx: Number(r.pending_fx) || 0,
   };
 }
 
@@ -329,7 +330,7 @@ export function extendWithBalances(repo) {
       const { data, error } = await supabase
         .from('account_balances')
         .select('account_id, label, type, currency, snapshot_date, snapshot_balance,'
-              + ' current_balance, has_snapshot, snapshot_stale, scope')
+              + ' current_balance, has_snapshot, snapshot_stale, scope, pending_fx')
         .eq('user_id', uid);
       if (error) boom('load balances', error);
       return (data ?? []).map(balanceFromRow);

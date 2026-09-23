@@ -134,6 +134,21 @@ to verify.
    `…90Days`) instead. Those wrappers exist because the Run button cannot pass
    an argument.
 
+### Cards that spend from an account
+
+A credit card is two accounts here — a colón balance and a dollar balance,
+billed separately — and a charge is matched to the right half by its currency.
+
+A **debit card is not an account at all**: it spends from one. BAC Mastercard
+****2207 is recorded on the *Ahorros ₡* savings account rather than as a card
+of its own, so its charges come off that balance instead of appearing as money
+owed. A dollar purchase on it is debited in colones at the bank's rate, so a
+charge whose currency does not match falls back to the card alone — but only
+when exactly one account carries that card, never for a split credit card.
+
+Until the month's exchange rate is set, a foreign charge is left out of the
+balance rather than guessed at, and the account row says how many.
+
 ### Work expenses
 
 Two different things, kept apart:

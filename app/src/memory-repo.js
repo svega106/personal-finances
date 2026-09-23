@@ -118,6 +118,7 @@ export function createMemoryRepo(seed = {}) {
           hasSnapshot: !!last,
           stale: last ? days > 30 : null,
           scope: a.scope || 'personal',
+          pendingFx: 0,
         };
       });
     },

@@ -418,3 +418,10 @@
 .work-tag{font-size:10.5px;text-transform:uppercase;letter-spacing:.6px;
   font-weight:700;color:var(--faint);border:1px solid var(--line);
   border-radius:999px;padding:4px 9px;white-space:nowrap}
+
+/* A card that spends from an account, shown on that account's row. */
+.acct-card{font-size:11px;padding:2px 8px;border-radius:999px;font-weight:600;
+  background:rgba(79,140,255,.13);color:var(--accent2)}
+
+/* A balance that is knowingly incomplete says so rather than reading low. */
+.acct-warn{font-size:11.5px;color:var(--warn);margin-top:4px;line-height:1.45}

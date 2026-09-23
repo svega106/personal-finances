@@ -148,6 +148,16 @@ function summary(saved, owed, monthKey) {
   </div>` : ''}`;
 }
 
+/**
+ * A debit card is not an account of its own — it spends from one. Saying so
+ * on the row is the difference between a balance that looks wrong and one
+ * that explains itself.
+ */
+function cardOn(b) {
+  const a = accountById(b.accountId);
+  return a?.last4 ? `<span class="acct-card">card ····${esc(a.last4)}</span>` : '';
+}
+
 function accountRow(b, monthKey, { owed = false } = {}) {
   const shown = owed ? Math.abs(b.currentBalance) : b.currentBalance;
   const crc = toCrc(b.currentBalance, b.currency, monthKey);
@@ -159,7 +169,13 @@ function accountRow(b, monthKey, { owed = false } = {}) {
   <div class="acct-row">
     <div class="acct-main">
       <div class="acct-name">${esc(b.label)}</div>
-      <div class="acct-meta">${owed ? '<span class="muted">from your transactions</span>' : staleLabel(b)}</div>
+      <div class="acct-meta">${owed
+        ? '<span class="muted">from your transactions</span>'
+        : `${staleLabel(b)}${cardOn(b)}`}</div>
+      ${!owed && b.pendingFx
+        ? `<div class="acct-warn">${b.pendingFx} foreign charge${b.pendingFx === 1 ? '' : 's'}
+             not in this balance — no rate set for ${esc(monthKey)}</div>`
+        : ''}
     </div>
     <div class="acct-amt">
       <div>${fmt(shown, b.currency)}${secondary}</div>
@@ -176,8 +192,9 @@ function savingsSection(list, monthKey) {
     <button class="btn ghost sm" onclick="acctAdd()">+ Add account</button>
   </div>
   <p class="muted acct-note">
-    These balances are yours to keep current — no bank emails when a savings
-    balance changes. Anything you record afterwards is added on top.
+    Yours to keep current: a transfer or a deposit sends no email, so the app
+    only knows what you tell it. Anything recorded after the date you set is
+    added on top — including card spending, where an account has a card.
   </p>
   <div class="card acct-list">
     ${rows.length

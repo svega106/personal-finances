@@ -57,10 +57,28 @@ export function toTransactionRow({ record: r, hit, account, userId }) {
   };
 }
 
-/** A card is identified by who issued it, its last four, and what it settles in. */
+/**
+ * Which account a charge belongs to.
+ *
+ * A credit card is identified by issuer, last four and the currency it
+ * settles in, because each card here is two accounts — the colón balance and
+ * the dollar balance are billed separately.
+ *
+ * A debit card is not. It spends from one account, and a foreign purchase is
+ * debited from that same balance at the bank's rate; only the notification
+ * speaks dollars. So when the currency does not match, fall back to the card
+ * alone — but only if exactly one account carries it. Two candidates means
+ * the card really is currency-split and guessing which half would be worse
+ * than leaving the charge unassigned.
+ */
 export function findAccount(accounts, { issuer, last4, currency }) {
-  return (accounts ?? []).find((a) =>
-    a.issuer === issuer
-    && a.last4 === last4
-    && (a.default_currency ?? a.currency) === currency) ?? null;
+  if (!issuer || !last4) return null;
+  const list = accounts ?? [];
+  const cur = (a) => a.default_currency ?? a.currency;
+
+  const exact = list.find((a) => a.issuer === issuer && a.last4 === last4 && cur(a) === currency);
+  if (exact) return exact;
+
+  const onCard = list.filter((a) => a.issuer === issuer && a.last4 === last4);
+  return onCard.length === 1 ? onCard[0] : null;
 }

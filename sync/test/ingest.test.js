@@ -23,6 +23,9 @@ const ACCOUNTS = [
   { id: 'prom-crc', issuer: 'promerica', last4: '1763', default_currency: 'CRC', scope: 'personal' },
   { id: 'bncr-crc', issuer: 'bncr', last4: '0828', default_currency: 'CRC', scope: 'work' },
   { id: 'bncr-usd', issuer: 'bncr', last4: '0828', default_currency: 'USD', scope: 'work' },
+  // A debit card on the colón savings account. One row, not two: it is not
+  // split by currency the way a credit card is.
+  { id: 'ahorros-crc', issuer: 'bac', last4: '2207', default_currency: 'CRC', scope: 'personal' },
 ];
 
 const RULES = [
@@ -185,4 +188,54 @@ test('a non-transaction email is not turned into a row', () => {
   });
   assert.equal(res.ok, false);
   assert.equal(res.reason, 'ignored');
+});
+
+
+/* ------------------------------------------- a debit card on a savings account */
+
+const BAC_MC_USD = {
+  from: 'NotificacionBAC@baccredomatic.cr',
+  subject: 'Notificación de transacción APPLE.COM/BILL',
+  body: `Comercio: | APPLE.COM/BILL |
+Ciudad y país: | CUPERTINO, Pais no Definido |
+Fecha: | Sep 23, 2026 , 09:13 |
+MASTER: | ************2207 |
+Autorización: | 883150 |
+Referencia: | 626672883150 |
+Tipo de Transacción: | COMPRA |
+Monto: | USD 4.99 |`,
+};
+
+const BAC_MC_CRC = {
+  ...BAC_MC_USD,
+  body: BAC_MC_USD.body.replace('USD 4.99', 'CRC 35,000.00').replace('APPLE.COM/BILL', 'SUPERMERCADO'),
+};
+
+test('a colón charge on the debit card lands on the savings account', () => {
+  const row = ingest(BAC_MC_CRC);
+  assert.equal(row.account_id, 'ahorros-crc');
+  assert.equal(row.amount, 35000);
+});
+
+test('a dollar charge on that same card lands there too', () => {
+  // The card is not currency-split: a foreign purchase is debited from the
+  // colón balance at the bank's rate, and only the notification says USD.
+  // Matching on currency alone would have left this unassigned.
+  const row = ingest(BAC_MC_USD);
+  assert.equal(row.account_id, 'ahorros-crc');
+  assert.equal(row.currency, 'USD');
+  assert.equal(row.amount, 4.99);
+  assert.equal(row.amount_crc, null, 'still needs the month rate, like any foreign charge');
+});
+
+test('a split credit card never falls back across its two halves', () => {
+  // BAC VISA 4477 exists twice, once per currency. A charge in a third
+  // currency must stay unassigned rather than pick one at random.
+  const odd = { ...BAC_USD, body: BAC_USD.body.replace('USD 42.30', 'EUR 42.30') };
+  assert.equal(ingest(odd).account_id, null);
+});
+
+test('an exact currency match still wins over the fallback', () => {
+  assert.equal(ingest(BAC_CRC).account_id, 'bac-visa-crc');
+  assert.equal(ingest(BAC_USD).account_id, 'bac-visa-usd');
 });
