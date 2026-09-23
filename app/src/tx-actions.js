@@ -5,7 +5,8 @@
  * which would create an import cycle.
  */
 import { openModal, closeModal, toast, render } from './app.js';
-import { getAccounts, accountById, matchRule, saveTransaction, removeTransaction, loadMonth, rateFor, setMonthRate } from './tx.js';
+import { getAccounts, accountById, matchRule, saveTransaction, removeTransaction, loadMonth, rateFor, setMonthRate, budgetLines } from './tx.js';
+import { getMonth, money } from './state.js';
 import { findRow, blankTx, CATS, esc, updateNavBadge } from './views-tx.js';
 import { txFilters } from './views-tx.js';
 
@@ -79,6 +80,13 @@ function sheet(t) {
         </select></div>
     </div>
 
+    <div class="field"><label>Budget line</label>
+      ${lineOptions(t)}
+      <div class="muted" style="font-size:11.5px;margin-top:5px;line-height:1.45">
+        Attach this to a line from the month's plan and it counts against it.
+        Left unattached, it still counts towards its category.
+      </div></div>
+
     <div class="field"><label>Note (optional)</label>
       <input class="inp" id="tx_note" value="${esc(t.note || '')}"></div>
 
@@ -94,6 +102,35 @@ function sheet(t) {
     </div>`;
 }
 
+/**
+ * Lines come from the plan for the month the charge is dated in, not the
+ * month being viewed — editing a September charge from October must still
+ * offer September's plan.
+ */
+function lineOptions(t) {
+  const monthKey = String(t.postedAt).slice(0, 7);
+  const lines = budgetLines(getMonth(monthKey));
+
+  if (!lines.length) {
+    return `<select class="inp" id="tx_line" disabled>
+      <option>No plan lines for ${esc(monthKey)} yet</option></select>`;
+  }
+
+  const GROUPS = [['bills', 'Fixed bills'], ['recurring', 'Recurring'], ['oneTime', 'One-time']];
+  const groups = GROUPS.map(([key, label]) => {
+    const inGroup = lines.filter((l) => l.group === key);
+    if (!inGroup.length) return '';
+    return `<optgroup label="${label}">${inGroup.map((l) => `
+      <option value="${esc(l.id)}"${t.budgetLineId === l.id ? ' selected' : ''}
+              data-cat="${esc(l.cat)}">${esc(l.name)} · ${money(l.amount)}</option>`).join('')}</optgroup>`;
+  }).join('');
+
+  return `<select class="inp" id="tx_line">
+    <option value=""${t.budgetLineId ? '' : ' selected'}>— not attached —</option>
+    ${groups}
+  </select>`;
+}
+
 function wireSheet() {
   const cur = document.getElementById('tx_currency');
   const acct = document.getElementById('tx_account');
@@ -107,6 +144,15 @@ function wireSheet() {
   acct?.addEventListener('change', () => {
     const a = getAccounts().find((x) => x.id === acct.value);
     if (a?.currency) { cur.value = a.currency; syncNote(); }
+  });
+
+  // A line belongs to a category, so picking one settles the category too
+  // rather than letting the two drift apart.
+  const line = document.getElementById('tx_line');
+  line?.addEventListener('change', () => {
+    const cat = line.selectedOptions[0]?.dataset?.cat;
+    const catSel = document.getElementById('tx_cat');
+    if (cat && catSel) catSel.value = cat;
   });
 
   document.getElementById('tx_save')?.addEventListener('click', txSave);
@@ -134,6 +180,7 @@ export async function txSave() {
     postedAt: `${val('tx_date')}T12:00:00-06:00`,
     accountId: val('tx_account') || null,
     cat: val('tx_cat') || null,
+    budgetLineId: val('tx_line') || null,
     scope: val('tx_scope') || 'personal',
     note: val('tx_note').trim() || null,
     reviewed: true,

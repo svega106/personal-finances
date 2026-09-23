@@ -133,6 +133,9 @@ export function spendTotals(rows) {
   const out = {
     needs: 0, wants: 0, savings: 0,
     uncategorized: 0, unbudgeted: 0, total: 0, work: 0, byLine: {},
+    // Categorized but matched no plan line, kept per category so the plan can
+    // show it as its own row instead of hiding the difference.
+    unbudgetedByCat: { needs: 0, wants: 0, savings: 0 },
     // Foreign charges with no rate for their month yet, by currency. These are
     // deliberately excluded from every colón total rather than guessed at.
     pending: {},
@@ -157,12 +160,66 @@ export function spendTotals(rows) {
     if (t.cat && out[t.cat] !== undefined) out[t.cat] += crc;
     else out.uncategorized += crc;
 
-    if (t.budgetLineId) out.byLine[t.budgetLineId] = (out.byLine[t.budgetLineId] || 0) + crc;
-    else out.unbudgeted += crc;
+    if (t.budgetLineId) {
+      out.byLine[t.budgetLineId] = (out.byLine[t.budgetLineId] || 0) + crc;
+    } else {
+      out.unbudgeted += crc;
+      if (t.cat && out.unbudgetedByCat[t.cat] !== undefined) out.unbudgetedByCat[t.cat] += crc;
+    }
   }
   return out;
 }
 
 export function unreviewedCount(rows) {
   return rows.filter((t) => !t.reviewed && t.status !== 'voided').length;
+}
+
+
+/* ------------------------------------------------------- actuals for a month */
+
+/**
+ * What was actually spent in a month, for the views that render synchronously.
+ *
+ * The plan and the dashboard are drawn from `state` in one pass, but
+ * transactions arrive from the server. Rather than make those views async,
+ * this hands back whatever is cached and, on a miss, loads in the background
+ * and re-renders once. `loading: true` lets a view say so instead of showing
+ * a zero that looks like "you have not spent anything".
+ */
+let loadingMonths = new Set();
+
+export function actualsFor(key, onLoaded) {
+  const rows = cachedMonth(key);
+  if (rows) return { ...spendTotals(rows), loading: false, count: rows.length };
+
+  if (!loadingMonths.has(key)) {
+    loadingMonths.add(key);
+    loadMonth(key)
+      .then(() => { loadingMonths.delete(key); onLoaded?.(); })
+      .catch(() => { loadingMonths.delete(key); });
+  }
+
+  return {
+    ...spendTotals([]), loading: true, count: 0,
+  };
+}
+
+/** Every plan line in a month, flattened, so a transaction can point at one. */
+export function budgetLines(month) {
+  if (!month) return [];
+  const take = (arr, group) => (arr ?? [])
+    .filter((x) => x.name || x.amount)
+    .map((x) => ({
+      id: x.id,
+      name: x.name || '(unnamed)',
+      amount: Number(x.amount) || 0,
+      // Bills are always essential; the other two carry their own category.
+      cat: group === 'bills' ? 'needs' : (x.cat || 'wants'),
+      group,
+    }));
+  return [
+    ...take(month.bills, 'bills'),
+    ...take(month.recurring, 'recurring'),
+    ...take(month.oneTime, 'oneTime'),
+  ];
 }

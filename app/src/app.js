@@ -4,6 +4,8 @@ import {
 } from './state.js';
 import { renderTransactions, updateNavBadge } from './views-tx.js';
 import { renderAccounts } from './views-accounts.js';
+import { actualsFor } from './tx.js';
+import { healthScore } from './scoring.js';
 import { loadMonth, cachedMonth } from './tx.js';
 
 let currentMonth = monthKey();
@@ -80,25 +82,6 @@ function compute(key){
   };
 }
 
-/* Financial health score 0-100 */
-function healthScore(c){
-  if(c.income<=0) return {score:0, label:"No data", cls:"warn"};
-  let s = 0;
-  const sr = c.pSavings;
-  s += Math.min(40, sr/20*40);
-  if(c.remaining>=0) s += 35;
-  else s += Math.max(0, 35 + (c.remaining/c.income)*100);
-  if(c.pNeeds<=50) s+=25;
-  else if(c.pNeeds<=65) s += 25 - (c.pNeeds-50)/15*25;
-  else s += 0;
-  s = Math.max(0,Math.min(100,Math.round(s)));
-  let label,cls;
-  if(s>=80){label="Excellent";cls="good";}
-  else if(s>=60){label="Healthy";cls="good";}
-  else if(s>=40){label="Needs work";cls="warn";}
-  else {label="At risk";cls="bad";}
-  return {score:s,label,cls};
-}
 
 /* Advisor insights */
 function buildAdvice(c){
@@ -178,9 +161,16 @@ function renderMonthSelector(){
 /* ---- Dashboard ---- */
 function renderDashboard(){
   const c = compute(currentMonth);
-  const h = healthScore(c);
-  const adv = buildAdvice(c);
   const a = state.settings.alloc;
+  const act = actualsFor(currentMonth, render);
+  const adv = buildAdvice(c);
+
+  // Real spending only counts once some has actually been recorded. An empty
+  // month should keep reading as a plan, not as "you have spent nothing".
+  const hasActuals = !act.loading && act.count > 0;
+  const spent = act.total;
+  const leftToSpend = c.planned - spent;
+  const h = healthScore(c, hasActuals ? spent : 0);
 
   const segs = [
     {k:'Essentials',v:c.needs,col:'var(--need)'},
@@ -219,9 +209,21 @@ function renderDashboard(){
   views.innerHTML = `
     <div class="grid g4" style="margin-bottom:4px">
       ${statCard("Income this month", money(c.income), c.used>0?`incl. ${money(c.used)} from savings`:"expected income")}
-      ${statCard("Planned spending", money(c.planned), `essentials ${money(c.needs)}`)}
-      ${statCard("Savings + investing", money(c.savings), `${c.pSavings.toFixed(0)}% of income`, c.pSavings>=a.savings?'good':'warn')}
-      ${statCard("Available", money(c.remaining), c.remaining>=0?"unassigned":"over budget", c.remaining>=0?'good':'bad')}
+      ${hasActuals
+        ? statCard("Spent so far", money(spent),
+            `of ${money(c.planned)} planned · ${act.count} transaction${act.count===1?'':'s'}`,
+            spent > c.planned ? 'bad' : null)
+        : statCard("Planned spending", money(c.planned), `essentials ${money(c.needs)}`)}
+      ${hasActuals
+        ? statCard("Left to spend", money(leftToSpend),
+            leftToSpend >= 0 ? 'against this month\u2019s plan' : 'over the plan',
+            leftToSpend >= 0 ? 'good' : 'bad')
+        : statCard("Savings + investing", money(c.savings), `${c.pSavings.toFixed(0)}% of income`, c.pSavings>=a.savings?'good':'warn')}
+      ${hasActuals
+        ? statCard("Needs review", String(act.uncategorized>0 ? money(act.uncategorized) : money(0)),
+            act.uncategorized>0 ? 'not categorized yet' : 'everything categorized',
+            act.uncategorized>0 ? 'warn' : 'good')
+        : statCard("Available", money(c.remaining), c.remaining>=0?"unassigned":"over budget", c.remaining>=0?'good':'bad')}
     </div>
 
     <div class="grid g2" style="margin-top:16px">
@@ -239,7 +241,9 @@ function renderDashboard(){
           <div>
             <span class="pill ${h.cls}">${h.label}</span>
             <p class="muted" style="font-size:13px;margin:10px 0 0;max-width:230px">
-              Based on your savings rate, how well essentials are controlled, and whether you live within your income.
+              ${hasActuals && spent > c.planned
+          ? 'Based on your savings rate, how well essentials are controlled, and whether you live within your income \u2014 measured against what you have actually spent, which is now past the plan.'
+          : 'Based on your savings rate, how well essentials are controlled, and whether you live within your income.'}
             </p>
           </div>
         </div>
@@ -253,12 +257,30 @@ function renderDashboard(){
 
     <div class="grid g2" style="margin-top:16px">
       <div class="card">
-        <h3>Cash flow vs. 50/30/20 target</h3>
+        <h3>${hasActuals ? 'Actual spending vs. 50/30/20 target' : 'Cash flow vs. 50/30/20 target'}</h3>
+        ${hasActuals ? `<div class="muted" style="font-size:12px;margin-top:2px">
+          What you have really spent, not what you planned to.</div>` : ''}
         <div class="cashflow-bar" style="margin-top:14px">
-          ${cfRow("Essentials",c.needs,c.tNeeds,'var(--need)')}
-          ${cfRow("Discretionary",c.wants,c.tWants,'var(--want)')}
-          ${cfRow("Savings/Inv.",c.savings,c.tSavings,'var(--save)')}
+          ${hasActuals ? `
+            ${cfRow("Essentials",act.needs,c.tNeeds,'var(--need)')}
+            ${cfRow("Discretionary",act.wants,c.tWants,'var(--want)')}
+            ${cfRow("Savings/Inv.",c.savings,c.tSavings,'var(--save)')}
+          ` : `
+            ${cfRow("Essentials",c.needs,c.tNeeds,'var(--need)')}
+            ${cfRow("Discretionary",c.wants,c.tWants,'var(--want)')}
+            ${cfRow("Savings/Inv.",c.savings,c.tSavings,'var(--save)')}
+          `}
         </div>
+        ${hasActuals && act.uncategorized > 0 ? `
+        <div class="muted" style="font-size:12px;margin-top:12px;line-height:1.5">
+          ${money(act.uncategorized)} is not in any of these yet —
+          <a href="#" onclick="setView('transactions');return false" style="color:var(--accent2)">categorize it</a>
+          to see where it really lands.
+        </div>` : ''}
+        ${hasActuals && act.pendingCount > 0 ? `
+        <div class="muted" style="font-size:12px;margin-top:8px;line-height:1.5">
+          ${act.pendingCount} foreign charge${act.pendingCount===1?'':'s'} excluded — no exchange rate set for this month.
+        </div>` : ''}
       </div>
       <div class="card">
         <h3>Goal progress</h3>
@@ -317,19 +339,79 @@ function renderPlan(){
   const c = compute(currentMonth);
   const a = state.settings.alloc;
 
-  function itemRows(arr,kind,withCat){
-    const head = `<div class="li-head"><span>Item</span><span>Amount</span>${withCat?'<span>Type</span>':'<span></span>'}<span></span></div>`;
-    const rows = arr.map((it,i)=>`
-      <div class="line-item">
+  // What was actually spent this month, by plan line. Loads in the background
+  // the first time and re-renders, so this stays a synchronous view.
+  const act = actualsFor(currentMonth, render);
+
+  /**
+   * How a line's spending compares with what was planned for it.
+   * Nothing planned and nothing spent reads as neither good nor bad.
+   */
+  function spentCell(id){
+    if(act.loading) return `<span class="li-actual muted">…</span>`;
+    const spent = act.byLine[id] || 0;
+    if(!spent) return `<span class="li-actual li-none">—</span>`;
+    return `<span class="li-actual">${money(spent)}</span>`;
+  }
+
+  /**
+   * Only two things here are worth a colour: you have gone over a line, or
+   * you are within a whisker of it.
+   *
+   * Under-spending is deliberately left uncoloured. Half the lines are under
+   * on the 9th of the month purely because the month is not over, so painting
+   * them green would be congratulating you for the calendar.
+   */
+  function overClass(planned, spent){
+    if(!planned || !spent) return '';
+    if(spent > planned) return ' li-over';
+    if(spent >= planned*0.9) return ' li-close';
+    return '';
+  }
+
+  /**
+   * `withSpent` is off for income: money coming in has nothing to compare
+   * against a plan line, and a "Spent" column beside it just reads as broken.
+   */
+  function itemRows(arr,kind,withCat,withSpent=true){
+    const cls = withSpent ? ' li-head-4' : '';
+    const rowCls = withSpent ? ' line-item-4' : '';
+    const head = withSpent
+      ? `<div class="li-head${cls}"><span>Item</span><span>Planned</span><span>Spent</span>${withCat?'<span>Type</span>':'<span></span>'}<span></span></div>`
+      : `<div class="li-head"><span>Item</span><span>Amount</span>${withCat?'<span>Type</span>':'<span></span>'}<span></span></div>`;
+    const rows = arr.map((it,i)=>{
+      const spent = act.byLine[it.id]||0;
+      return `
+      <div class="line-item${rowCls}${withSpent?overClass(+it.amount||0, spent):''}">
         <input value="${esc(it.name||'')}" placeholder="Name" oninput="updItem('${kind}',${i},'name',this.value)">
         <input type="number" inputmode="numeric" value="${it.amount||''}" placeholder="0" oninput="updItem('${kind}',${i},'amount',this.value)">
+        ${withSpent?spentCell(it.id):''}
         ${withCat?`<select class="cat" onchange="updItem('${kind}',${i},'cat',this.value)">
           <option value="needs" ${it.cat==='needs'?'selected':''}>Essential</option>
           <option value="wants" ${it.cat!=='needs'?'selected':''}>Discretionary</option>
         </select>`:'<span></span>'}
         <button class="del" onclick="delItem('${kind}',${i})" title="Remove">×</button>
-      </div>`).join('');
+      </div>`;
+    }).join('');
     return head + (rows||`<div class="muted" style="font-size:12.5px;padding:4px 2px">Nothing yet.</div>`);
+  }
+
+  /**
+   * Spending that fell in a category but matched no line.
+   *
+   * Shown as its own row rather than folded into a total: the gap between the
+   * plan and reality is the interesting part, and hiding it is how a budget
+   * quietly stops describing anything.
+   */
+  function unmatchedRow(cat){
+    if(act.loading) return '';
+    const v = act.unbudgetedByCat[cat]||0;
+    if(!v) return '';
+    return `<div class="li-unmatched">
+      <span>Spent but not on a line above</span>
+      <span>${money(v)}</span>
+      <button class="btn ghost sm" onclick="setView('transactions')">Assign →</button>
+    </div>`;
   }
 
   const goalRows = state.goals.length ? state.goals.map(g=>{
@@ -353,7 +435,7 @@ function renderPlan(){
           <input class="inp" type="number" inputmode="numeric" value="${m.income||''}" placeholder="0" oninput="updIncome(this.value)">
         </div>
         <div class="row-between"><span class="total">Anticipated additional income</span><span class="total">${money(c.extra)}</span></div>
-        <div style="margin-top:8px">${itemRows(m.extraIncome,'extraIncome',false)}</div>
+        <div style="margin-top:8px">${itemRows(m.extraIncome,'extraIncome',false,false)}</div>
         <button class="addrow" onclick="addItem('extraIncome')">+ Add extra income</button>
       </div>
 
@@ -379,6 +461,7 @@ function renderPlan(){
         <div class="row-between"><h4>🏠 Mandatory fixed bills</h4><span class="total">${money(c.billsTotal)}</span></div>
         <div class="muted" style="font-size:12px;margin-bottom:10px">Rent, utilities, loans, insurance — essentials.</div>
         ${itemRows(m.bills,'bills',false)}
+        ${unmatchedRow('needs')}
         <button class="addrow" onclick="addItem('bills')">+ Add bill</button>
       </div>
 
@@ -386,6 +469,7 @@ function renderPlan(){
         <div class="row-between"><h4>🔁 Recurring expenses</h4></div>
         <div class="muted" style="font-size:12px;margin-bottom:10px">Subscriptions, transport, food — mark whether each is essential or discretionary.</div>
         ${itemRows(m.recurring,'recurring',true)}
+        ${unmatchedRow('wants')}
         <button class="addrow" onclick="addItem('recurring')">+ Add recurring</button>
       </div>
 

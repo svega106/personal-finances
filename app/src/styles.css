@@ -334,3 +334,32 @@
   .acct-row{padding:12px 14px;gap:10px}
   .acct-amt{font-size:14px}
 }
+
+/* ------------------------------------------------- plan: planned vs actual */
+
+.line-item-4{grid-template-columns:1fr 110px 96px 120px 34px}
+.li-head-4{grid-template-columns:1fr 110px 96px 120px 34px}
+
+.li-actual{font-size:13px;font-variant-numeric:tabular-nums;text-align:right;
+  padding-right:4px;color:var(--text)}
+.li-none{color:var(--faint)}
+
+/* Only over-budget and nearly-over get a colour; see overClass() for why
+   under-spending does not. */
+.line-item-4.li-close .li-actual{color:var(--warn)}
+.line-item-4.li-over  .li-actual{color:var(--bad);font-weight:650}
+
+.li-unmatched{display:flex;align-items:center;gap:10px;margin:2px 0 8px;
+  padding:9px 11px;border:1px dashed var(--line);border-radius:10px;
+  font-size:12.5px;color:var(--muted)}
+.li-unmatched span:nth-child(2){margin-left:auto;font-weight:650;color:var(--text);
+  font-variant-numeric:tabular-nums}
+
+@media (max-width:860px){
+  /* Four columns, so the fourth child has to go whether it is the category
+     select or the empty placeholder — hiding only `.cat` would leave the
+     placeholder occupying a cell and push the delete button onto its own row. */
+  .line-item-4,.li-head-4{grid-template-columns:1fr 84px 78px 34px}
+  .line-item-4 > *:nth-child(4),
+  .li-head-4 > *:nth-child(4){display:none}
+}
