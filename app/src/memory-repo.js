@@ -52,6 +52,12 @@ export function createMemoryRepo(seed = {}) {
         .sort((a, b) => (a.postedAt < b.postedAt ? 1 : -1));
     },
 
+    async listWorkCharges({ since }) {
+      return structuredClone(store.transactions)
+        .filter((t) => t.scope === 'work' && t.postedAt >= since)
+        .sort((a, b) => (a.postedAt < b.postedAt ? 1 : -1));
+    },
+
     async upsertTransaction(t) {
       const row = structuredClone(t);
       // Mirrors the unique (user_id, ext_id) constraint in Postgres.

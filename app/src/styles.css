@@ -363,3 +363,32 @@
   .line-item-4 > *:nth-child(4),
   .li-head-4 > *:nth-child(4){display:none}
 }
+
+/* ------------------------------------------------ work reimbursement list */
+
+.work-head{display:flex;align-items:center;gap:12px;padding:11px 18px;
+  border-bottom:1px solid var(--line)}
+.work-head .tx-check{margin-right:auto;font-size:12.5px}
+
+.work-row{gap:12px}
+.work-pick{flex:0 0 auto;margin:0}
+
+/* Settled charges stay visible but stop competing for attention. */
+.work-done .acct-name,.work-done .acct-amt{color:var(--muted)}
+
+.work-settled{margin-top:12px}
+.work-settled summary{font-size:12.5px;color:var(--muted);cursor:pointer;
+  padding:6px 2px;user-select:none}
+.work-settled summary:hover{color:var(--text)}
+.work-settled[open] summary{margin-bottom:8px}
+
+@media (max-width:720px){
+  .work-head{padding:10px 14px}
+  .work-row{gap:9px}
+}
+
+/* A disabled button must not look pressable. Without this the "Mark
+   reimbursed" action reads as available while nothing is selected. */
+.btn:disabled,.btn:disabled:hover{opacity:.42;cursor:not-allowed;
+  background:var(--surface2);color:var(--muted);box-shadow:none}
+.btn.ghost:disabled{background:transparent;border-color:var(--line)}

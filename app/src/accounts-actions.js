@@ -9,7 +9,11 @@ import { openModal, closeModal, toast, render } from './app.js';
 import { getRepo } from './repo.js';
 import { getAccounts, loadMonth, loadReference, saveTransaction } from './tx.js';
 import { esc } from './views-tx.js';
-import { cachedBalances, invalidateAccounts, getWorkRows } from './views-accounts.js';
+import {
+  cachedBalances, invalidateAccounts, onWorkLoaded,
+  workSelected, clearWorkSelection, setAllWorkSelected, pickWork,
+} from './views-accounts.js';
+import { loadWork, invalidateWork, cachedWork, settle, unsettle } from './work.js';
 
 const today = () => new Date().toISOString().slice(0, 10);
 const val = (id) => document.getElementById(id)?.value ?? '';
@@ -140,16 +144,44 @@ export function acctAdd() {
 
 /* ------------------------------------------------------ work reimbursement */
 
-export function acctMarkReimbursed() {
-  const pending = getWorkRows().filter((t) => t.reimbursement?.status !== 'reimbursed');
-  if (!pending.length) { toast('Nothing pending'); return; }
+// Repaint the accounts view when work charges finish loading.
+onWorkLoaded(() => render());
+
+function findWork(id) {
+  return (cachedWork() ?? []).find((t) => t.id === id) || null;
+}
+
+export function acctPickWork(id, on) {
+  pickWork(id, on);
+  render();
+}
+
+export function acctSelectAllWork(on) {
+  setAllWorkSelected(on);
+  render();
+}
+
+/** One charge, one click — the common case deserves no dialog. */
+export async function acctSettleOne(id) {
+  const t = findWork(id);
+  if (!t) { toast('Charge not found'); return; }
+  await applySettle([t], today());
+}
+
+/**
+ * Several at once, under a single date, because work pays for a batch of
+ * charges in one transfer.
+ */
+export function acctSettleSelected() {
+  const ids = [...workSelected()];
+  const rows = ids.map(findWork).filter(Boolean);
+  if (!rows.length) { toast('Nothing selected'); return; }
 
   openModal(`
-    <h3>Mark ${pending.length} charge${pending.length === 1 ? '' : 's'} reimbursed</h3>
-    <p class="muted" style="font-size:13px;margin:-4px 0 18px;line-height:1.55">
-      This records that the money came back for every work charge still
-      pending this month. The charges stay in your history — only their
-      status changes.
+    <h3>Mark ${rows.length} charge${rows.length === 1 ? '' : 's'} reimbursed</h3>
+    <p class="muted" style="font-size:13px;margin:-4px 0 16px;line-height:1.55">
+      The charges stay in your history — only their status changes. You can
+      undo any of them afterwards.
     </p>
     <div class="field"><label>Reimbursed on</label>
       <input class="inp" id="rb_date" type="date" value="${today()}"></div>
@@ -160,24 +192,55 @@ export function acctMarkReimbursed() {
     </div>`);
 
   document.getElementById('rb_save')?.addEventListener('click', async () => {
-    const on = val('rb_date') || today();
     const btn = document.getElementById('rb_save');
     btn.disabled = true; btn.textContent = 'Saving…';
-    try {
-      // One at a time: a partial failure should leave the rest correct rather
-      // than rolling back charges that were already settled.
-      for (const t of pending) {
-        await saveTransaction({ ...t, reimbursement: { status: 'reimbursed', on } });
-      }
-      const month = window.__txMonth || new Date().toISOString().slice(0, 7);
-      await loadMonth(month, { force: true });
-      invalidateAccounts();
-      closeModal();
-      render();
-      toast(`${pending.length} charge${pending.length === 1 ? '' : 's'} marked reimbursed`);
-    } catch (err) {
-      btn.disabled = false; btn.textContent = 'Confirm';
-      toast(`Could not save: ${err.message}`);
-    }
+    const ok = await applySettle(rows, val('rb_date') || today(), { silent: true });
+    if (ok) { closeModal(); toast(`${rows.length} marked reimbursed`); }
+    else { btn.disabled = false; btn.textContent = 'Confirm'; }
   });
+}
+
+export async function acctUnsettle(id) {
+  const t = findWork(id);
+  if (!t) { toast('Charge not found'); return; }
+  try {
+    await saveTransaction(unsettle(t));
+    await refreshWork();
+    toast('Moved back to outstanding');
+  } catch (err) {
+    toast(`Could not undo: ${err.message}`);
+  }
+}
+
+/**
+ * Saves one at a time on purpose: a partial failure should leave the charges
+ * that did settle settled, rather than rolling back money that really did
+ * come back.
+ */
+async function applySettle(rows, on, { silent = false } = {}) {
+  const failed = [];
+  for (const t of rows) {
+    try {
+      await saveTransaction(settle(t, on));
+    } catch (err) {
+      failed.push(`${t.merchant || t.merchantRaw}: ${err.message}`);
+    }
+  }
+
+  clearWorkSelection();
+  await refreshWork();
+
+  if (failed.length) {
+    toast(`${failed.length} could not be saved — ${failed[0]}`);
+    return false;
+  }
+  if (!silent) toast('Marked reimbursed');
+  return true;
+}
+
+async function refreshWork() {
+  invalidateWork();
+  invalidateAccounts();
+  await loadWork({ force: true });
+  render();
 }

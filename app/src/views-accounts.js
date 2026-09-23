@@ -12,11 +12,18 @@
  */
 import { money } from './state.js';
 import { getRepo } from './repo.js';
-import { rateFor, loadMonth } from './tx.js';
-import { esc } from './views-tx.js';
+import { rateFor } from './tx.js';
+import { esc, dayKey, dayLabel } from './views-tx.js';
+import { workFor, splitWork, totalByCurrency, isReimbursed } from './work.js';
+
+/**
+ * Lets the actions module force a repaint once a settle has landed. Declared
+ * up here rather than beside its use, so it cannot be read before assignment.
+ */
+let rerender = () => {};
+export function onWorkLoaded(fn) { rerender = fn; }
 
 let balances = null;
-let workRows = [];
 let loadedFor = null;
 
 export function cachedBalances() { return balances; }
@@ -82,10 +89,9 @@ export function renderAccounts(views, monthKey) {
 
   views.innerHTML = `<div class="card"><p class="muted" style="font-size:13px">Loading accounts…</p></div>`;
 
-  Promise.all([getRepo().listAccountBalances(), loadMonth(monthKey)])
-    .then(([list, rows]) => {
+  getRepo().listAccountBalances()
+    .then((list) => {
       balances = list;
-      workRows = rows.filter((t) => t.scope === 'work');
       loadedFor = monthKey;
       views.innerHTML = shell(list, monthKey);
     })
@@ -106,7 +112,7 @@ function shell(list, monthKey) {
     ${summary(saved, owed, monthKey)}
     ${savingsSection(list, monthKey)}
     ${cardsSection(list, monthKey)}
-    ${workSection(monthKey)}
+    ${workSection()}
   `;
 }
 
@@ -195,54 +201,121 @@ function cardsSection(list, monthKey) {
 
 /**
  * Work charges are spending you expect back, so they are kept out of every
- * personal total elsewhere. This is the one place they are added up.
+ * personal total elsewhere. This is where they are chased down.
+ *
+ * Not limited to the month on screen: reimbursement usually lands a month or
+ * two after the charge, and having to navigate back to September to settle
+ * something you were paid for in October is how a list like this stops being
+ * used.
  */
-function workSection(monthKey) {
-  const pending = workRows.filter((t) => t.reimbursement?.status !== 'reimbursed');
-  const done = workRows.filter((t) => t.reimbursement?.status === 'reimbursed');
-  const sum = (rows, cur) => rows
-    .filter((t) => t.currency === cur)
-    .reduce((s, t) => s + t.amount, 0);
+function workSection() {
+  const { rows, loading } = workFor(rerender);
+  if (loading) {
+    return `
+    <div class="section-title" style="margin-top:26px"><span>Work — reimbursable</span></div>
+    <div class="card"><p class="muted" style="font-size:13px">Loading work charges…</p></div>`;
+  }
 
-  const amounts = [
-    sum(pending, 'CRC') ? money(sum(pending, 'CRC')) : null,
-    sum(pending, 'USD') ? `$${sum(pending, 'USD').toFixed(2)}` : null,
-  ].filter(Boolean);
+  const { outstanding, settled } = splitWork(rows);
+  const owed = totalByCurrency(outstanding);
+  // Colones and dollars are never added together here: the two balances are
+  // settled separately, and the month's rate has nothing to do with what work
+  // owes you.
+  const amounts = Object.entries(owed)
+    .sort(([a], [b]) => (a === 'CRC' ? -1 : b === 'CRC' ? 1 : a.localeCompare(b)))
+    .map(([cur, v]) => fmt(v, cur))
+    .join(' + ');
 
   return `
-  <div class="section-title" style="margin-top:26px"><span>Work — reimbursable</span></div>
+  <div class="section-title spread" style="margin-top:26px">
+    <span>Work — reimbursable</span>
+    ${outstanding.length ? `<span class="muted" style="font-size:13px;font-weight:500">
+      ${esc(amounts)} outstanding</span>` : ''}
+  </div>
   <p class="muted acct-note">
-    Charges on the BNCR card. They are excluded from your personal spending,
-    and tracked here until the money comes back.
+    Charges on the BNCR card, from any month — reimbursement usually arrives
+    later than the charge. They are excluded from your personal spending.
   </p>
+
+  ${outstanding.length ? `
   <div class="card acct-list">
-    ${workRows.length ? `
-      <div class="acct-row">
-        <div class="acct-main">
-          <div class="acct-name">Awaiting reimbursement</div>
-          <div class="acct-meta muted">${pending.length} charge${pending.length === 1 ? '' : 's'} this month</div>
-        </div>
-        <div class="acct-amt"><div>${amounts.length ? amounts.join(' + ') : money(0)}</div></div>
+    <div class="work-head">
+      <label class="tx-check">
+        <input type="checkbox" id="work_all" onchange="acctSelectAllWork(this.checked)"
+               ${allSelected(outstanding) ? 'checked' : ''}>
+        <span>${selectedCount() ? `${selectedCount()} selected` : 'Select all'}</span>
+      </label>
+      <button class="btn sm" ${selectedCount() ? '' : 'disabled'}
+              onclick="acctSettleSelected()">Mark reimbursed</button>
+    </div>
+    ${outstanding.map(workRow).join('')}
+  </div>` : `
+  <div class="card" style="text-align:center;padding:30px 20px">
+    <p class="muted" style="font-size:13px;margin:0">
+      Nothing outstanding. Every work charge has been reimbursed.</p>
+  </div>`}
+
+  ${settled.length ? `
+  <details class="work-settled">
+    <summary>${settled.length} already reimbursed</summary>
+    <div class="card acct-list">
+      ${settled.slice(0, 40).map(workRow).join('')}
+    </div>
+  </details>` : ''}`;
+}
+
+function workRow(t) {
+  const done = isReimbursed(t);
+  // dayKey, not a slice of the timestamp: Postgres returns UTC, so an evening
+  // charge slices to the following date. Same bug the ledger had.
+  const when = dayLabel(dayKey(t.postedAt));
+  return `
+  <div class="acct-row work-row${done ? ' work-done' : ''}">
+    ${done ? '' : `<input type="checkbox" class="work-pick" ${selected.has(t.id) ? 'checked' : ''}
+            onchange="acctPickWork('${esc(t.id)}',this.checked)">`}
+    <div class="acct-main">
+      <div class="acct-name">${esc(t.merchant || t.merchantRaw || '(no merchant)')}</div>
+      <div class="acct-meta muted">
+        ${esc(when)}${t.reimbursement?.on ? ` · reimbursed ${esc(dayLabel(t.reimbursement.on))}` : ''}
       </div>
-      ${done.length ? `
-      <div class="acct-row">
-        <div class="acct-main">
-          <div class="acct-name">Already reimbursed</div>
-          <div class="acct-meta muted">${done.length} charge${done.length === 1 ? '' : 's'} this month</div>
-        </div>
-        <div class="acct-amt"><div class="muted">${money(sum(done, 'CRC'))}</div></div>
-      </div>` : ''}
-      ${pending.length ? `
-      <div class="acct-row acct-actions">
-        <button class="btn ghost sm" onclick="setView('transactions')">Review them →</button>
-        <button class="btn sm" onclick="acctMarkReimbursed()">Mark all reimbursed</button>
-      </div>` : ''}
-    ` : '<div class="muted" style="padding:18px;text-align:center;font-size:13px">No work charges this month.</div>'}
+    </div>
+    <div class="acct-amt"><div>${fmt(t.amount, t.currency)}</div></div>
+    ${done
+      ? `<button class="btn ghost sm" onclick="acctUnsettle('${esc(t.id)}')">Undo</button>`
+      : `<button class="btn ghost sm" onclick="acctSettleOne('${esc(t.id)}')">Settle</button>`}
   </div>`;
 }
 
-/**
- * A getter, not the binding itself: an imported `let` is read-only to the
- * importer, and Rollup rejects an assignment to one at build time.
- */
-export function getWorkRows() { return workRows; }
+/* ------------------------------------------------------------ selection */
+
+const selected = new Set();
+
+export function workSelected() { return selected; }
+export function selectedCount() { return selected.size; }
+
+function allSelected(outstanding) {
+  return outstanding.length > 0 && outstanding.every((t) => selected.has(t.id));
+}
+
+/** Only outstanding charges can be picked; a settled one has nothing to settle. */
+export function setAllWorkSelected(on) {
+  selected.clear();
+  if (on) {
+    const { outstanding } = splitWork(cachedWorkRows());
+    for (const t of outstanding) selected.add(t.id);
+  }
+}
+
+export function pickWork(id, on) {
+  if (on) selected.add(id); else selected.delete(id);
+}
+
+function cachedWorkRows() {
+  const { rows } = workFor();
+  return rows;
+}
+
+/** Selections must not survive the rows they point at. */
+export function clearWorkSelection() { selected.clear(); }
+
+

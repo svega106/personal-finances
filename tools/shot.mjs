@@ -84,6 +84,9 @@ await page.addInitScript((seed) => {
     listAccounts: async () => clone(store.accounts),
     listRules: async () => clone(store.rules),
     listFxRates: async () => clone(store.fxRates || []),
+    listWorkCharges: async ({ since }) => clone(store.transactions || [])
+      .filter((t) => t.scope === 'work' && t.postedAt >= since)
+      .sort((a, b) => (a.postedAt < b.postedAt ? 1 : -1)),
     // Kept in step with the real repo on purpose: a harness stub that is
     // missing a method fails as a hung selector, not as an error.
     listAccountBalances: async () => clone(store.accounts || []).map((a) => {

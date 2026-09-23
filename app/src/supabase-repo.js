@@ -259,6 +259,26 @@ export function extendWithTransactions(repo) {
       return (data ?? []).map(txFromRow);
     },
 
+    /**
+     * Every work charge since `since`, newest first.
+     *
+     * Not filtered by reimbursement status in SQL: the status lives in a jsonb
+     * column and rows that have never been touched hold null there, so the
+     * filter would have to cover both "not reimbursed" and "no reimbursement
+     * object at all". There are a few hundred of these a year, so the split
+     * happens in the view where it is legible.
+     */
+    async listWorkCharges({ since }) {
+      const uid = await userId();
+      const { data, error } = await supabase
+        .from('transactions').select(TX_COLS)
+        .eq('user_id', uid).eq('scope', 'work')
+        .gte('posted_at', since)
+        .order('posted_at', { ascending: false });
+      if (error) boom('load work charges', error);
+      return (data ?? []).map(txFromRow);
+    },
+
     async upsertTransaction(t) {
       const uid = await userId();
       const { data, error } = await supabase
