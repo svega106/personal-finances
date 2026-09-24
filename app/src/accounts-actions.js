@@ -10,6 +10,7 @@ import { getRepo } from './repo.js';
 import { getAccounts, loadMonth, saveTransaction } from './tx.js';
 import { esc, dayKey } from './views-tx.js';
 import { afterLedgerChange, afterAccountChange } from './refresh.js';
+import { accountPatch } from './account-patch.js';
 import {
   cachedBalances, invalidateAccounts, onWorkLoaded,
   workSelected, clearWorkSelection, setAllWorkSelected, pickWork,
@@ -126,11 +127,11 @@ function accountForm(a) {
       <input class="inp" id="acc_inst" value="${esc(a?.institution ?? '')}"
              placeholder="e.g. BAC Credomatic"></div>
 
-    ${isCard ? '' : `
-    <div class="field"><label>Card on this account (optional)</label>
+    <div class="field">
+      <label>${isCard ? 'Card' : 'Card on this account (optional)'}</label>
       <div class="tx-2col">
         <select class="inp" id="acc_issuer">
-          <option value="">— no card —</option>
+          <option value=""${a?.issuer ? '' : ' selected'}>${isCard ? '— choose the bank —' : '— no card —'}</option>
           ${[['bac', 'BAC'], ['davivienda', 'Davivienda'], ['promerica', 'Promerica'], ['bncr', 'BNCR']]
             .map(([k, l]) => `<option value="${k}"${a?.issuer === k ? ' selected' : ''}>${l}</option>`).join('')}
         </select>
@@ -138,9 +139,13 @@ function accountForm(a) {
                placeholder="Last 4 digits" inputmode="numeric" maxlength="4">
       </div>
       <div class="muted" style="font-size:11.5px;margin-top:5px;line-height:1.45">
-        A debit card is not an account of its own — it spends from this one, so
-        its charges come straight off this balance.
-      </div></div>`}
+        ${isCard
+          ? `This is how a charge finds its way here. The bank names the card by
+             these four digits and nothing else, so an account without them can
+             never be matched to anything.`
+          : `A debit card is not an account of its own — it spends from this one,
+             so its charges come straight off this balance.`}
+      </div></div>
 
     <div class="actions">
       ${isNew ? '<span></span>'
@@ -164,35 +169,27 @@ export function acctEdit(id) {
 
 function wireAccountForm(existing) {
   document.getElementById('acc_save')?.addEventListener('click', async () => {
-    const label = val('acc_label').trim();
-    if (!label) { toast('Give the account a name'); return; }
+    // Only fields the form put on the page. Absent is not empty.
+    const fields = { label: val('acc_label'), institution: val('acc_inst') };
+    if (document.getElementById('acc_type')) fields.type = val('acc_type');
+    if (document.getElementById('acc_currency')) fields.currency = val('acc_currency');
+    if (document.getElementById('acc_issuer')) fields.issuer = val('acc_issuer');
+    if (document.getElementById('acc_last4')) fields.last4 = val('acc_last4');
+
+    const { row, error } = accountPatch(existing, fields);
+    if (error) { toast(error); return; }
 
     const clash = getAccounts().some(
-      (x) => x.id !== existing?.id && x.label.toLowerCase() === label.toLowerCase());
+      (x) => x.id !== existing?.id && x.label.toLowerCase() === row.label.toLowerCase());
     if (clash) { toast('An account with that name already exists'); return; }
-
-    const last4 = val('acc_last4').replace(/\D/g, '');
-    const issuer = val('acc_issuer');
-    if (issuer && last4.length !== 4) { toast('A card needs its last 4 digits'); return; }
-    if (last4 && !issuer) { toast('Choose which bank the card is from'); return; }
 
     const btn = document.getElementById('acc_save');
     btn.disabled = true; btn.textContent = 'Saving…';
     try {
-      await getRepo().upsertAccount({
-        id: existing?.id,
-        label,
-        type: existing?.type === 'card' ? 'card' : val('acc_type'),
-        currency: existing ? existing.currency : val('acc_currency'),
-        institution: val('acc_inst').trim() || null,
-        scope: existing?.scope || 'personal',
-        issuer: issuer || null,
-        brand: issuer ? (existing?.brand || null) : null,
-        last4: last4 || null,
-      });
+      await getRepo().upsertAccount(row);
       await refreshAccounts();
       closeModal();
-      toast(existing ? `${label} saved` : `${label} added`);
+      toast(existing ? `${row.label} saved` : `${row.label} added`);
     } catch (err) {
       btn.disabled = false; btn.textContent = existing ? 'Save' : 'Add';
       toast(err.message);
