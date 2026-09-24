@@ -54,6 +54,12 @@
   .month-pick select option{background:var(--surface2)}
   .iconbtn{background:var(--surface2);border:1px solid var(--line);color:var(--text);width:34px;height:34px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:16px}
   .iconbtn:hover{border-color:var(--accent)}
+  .topbar-tools{display:flex;align-items:center;gap:8px}
+  /* The refresh button spins only while a refresh is in flight, so a click
+     that finishes instantly still shows that something happened. */
+  #refreshBtn.busy{color:var(--accent2);animation:spin .8s linear infinite}
+  #refreshBtn:disabled{opacity:1;cursor:progress}
+  @keyframes spin{to{transform:rotate(360deg)}}
 
   /* Cards / grid */
   .grid{display:grid;gap:16px}
@@ -207,6 +213,13 @@
   }
   .tx-list .tx-row:last-child{border-bottom:0}
   .tx-row:hover{background:var(--surface2)}
+  /* The row you just saved, so a charge added to a long list is visibly
+     where it landed rather than only announced by a toast. */
+  .tx-flash{animation:txflash 1.8s ease-out}
+  @keyframes txflash{
+    0%,55%{background:rgba(79,140,255,.22);box-shadow:inset 3px 0 0 var(--accent)}
+    100%{background:transparent;box-shadow:inset 3px 0 0 transparent}
+  }
   .tx-main{flex:1;min-width:0}
   .tx-name{
     font-size:14px;color:var(--text);display:flex;align-items:center;gap:7px;
@@ -288,7 +301,8 @@
 
     .topbar{margin-bottom:18px; gap:10px}
     .topbar h2{font-size:19px}
-    .month-pick{width:100%; justify-content:space-between}
+    .topbar-tools{width:100%}
+    .month-pick{flex:1; justify-content:space-between}
     .month-pick select{flex:1}
 
     .grid, .g2, .g4{grid-template-columns:1fr; gap:12px}

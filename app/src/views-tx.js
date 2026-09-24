@@ -101,6 +101,7 @@ export function renderTransactions(views, monthKey) {
   if (cached) {
     currentRows = cached;
     updateNavBadge(cached); // the cached path must refresh it too
+    settleFlash();
     return;
   }
 
@@ -110,6 +111,7 @@ export function renderTransactions(views, monthKey) {
       currentRows = rows;
       views.innerHTML = shell(rows, monthKey);
       updateNavBadge(rows);
+      settleFlash();
     })
     .catch((err) => {
       views.innerHTML = `<div class="card"><h3>Could not load transactions</h3>
@@ -250,14 +252,56 @@ function groupByDay(rows) {
 }
 
 function row(t) {
+  const flash = t.id && t.id === flashId ? ' tx-flash' : '';
   return `
-  <div class="tx-row${t.reviewed ? '' : ' tx-unreviewed'}" onclick="txEdit('${esc(t.id)}')">
+  <div class="tx-row${t.reviewed ? '' : ' tx-unreviewed'}${flash}"
+       id="tx-${esc(t.id)}" onclick="txEdit('${esc(t.id)}')">
     <div class="tx-main">
       <div class="tx-name">${esc(displayName(t))}${t.reviewed ? '' : '<span class="tx-dot" title="Not reviewed"></span>'}</div>
       <div class="tx-meta">${timeLabel(t.postedAt)} ${accountChip(t)} ${catChip(t)}</div>
     </div>
     ${amountCell(t)}
   </div>`;
+}
+
+/* ---------------------------------------------------------- landing spot */
+
+/**
+ * Where the eye should go after a save.
+ *
+ * A charge added to a month with sixty others lands wherever its date puts
+ * it, which can be off screen — the toast says it saved, but nothing visibly
+ * happens. This marks the row so the next paint scrolls to it and flashes it
+ * once.
+ */
+let flashId = null;
+
+export function flashRow(id) { flashId = id ?? null; }
+
+/**
+ * Told when a saved row is in the month but hidden by an active filter.
+ *
+ * Registered by tx-actions, which can reach `toast`. This module deliberately
+ * does not import app.js — see the header.
+ */
+let onHidden = () => {};
+export function onFlashHidden(fn) { onHidden = fn; }
+
+/** Called right after the view's HTML is in the DOM. */
+function settleFlash() {
+  if (!flashId) return;
+  const id = flashId;
+  flashId = null;
+
+  const el = document.getElementById(`tx-${id}`);
+  if (el) {
+    // Not 'smooth': on a long list the scroll outlasts the highlight.
+    el.scrollIntoView({ block: 'center' });
+    return;
+  }
+  // It saved, it is in the month, and the filter you set earlier is hiding
+  // it. Silence here looks exactly like a save that did not work.
+  if (currentRows.some((t) => t.id === id)) onHidden();
 }
 
 /* ------------------------------------------------------------ nav badge */
@@ -281,9 +325,13 @@ export function findRow(id) {
 export function blankTx(monthKey) {
   // Default to today when the visible month is the current one, else the 1st,
   // so a manual entry never silently lands in a month you are not looking at.
-  const now = new Date();
-  const thisMonth = now.toISOString().slice(0, 7) === monthKey;
-  const date = thisMonth ? now.toISOString().slice(0, 10) : `${monthKey}-01`;
+  //
+  // Today is the Costa Rica day, not the UTC one. Slicing an ISO string dates
+  // anything entered after 6pm as tomorrow — and on the last evening of a
+  // month, into the next month, where it is saved but invisible.
+  const today = dayKey(new Date());
+  const thisMonth = today.slice(0, 7) === monthKey;
+  const date = thisMonth ? today : `${monthKey}-01`;
   return {
     id: null,
     extId: `manual:${uid()}${Date.now().toString(36)}`,

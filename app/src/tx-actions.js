@@ -5,13 +5,18 @@
  * which would create an import cycle.
  */
 import { openModal, closeModal, toast, render } from './app.js';
-import { getAccounts, accountById, matchRule, saveTransaction, removeTransaction, loadMonth, rateFor, setMonthRate, budgetLines } from './tx.js';
+import { getAccounts, accountById, matchRule, saveTransaction, removeTransaction, rateFor, setMonthRate, budgetLines } from './tx.js';
 import { getMonth, money } from './state.js';
 import { initialReimbursement } from './work.js';
-import { findRow, blankTx, CATS, esc, updateNavBadge } from './views-tx.js';
+import { findRow, blankTx, CATS, esc, flashRow, dayKey, onFlashHidden } from './views-tx.js';
+import { afterLedgerChange } from './refresh.js';
 import { txFilters } from './views-tx.js';
 
 let editing = null;
+
+// A charge can save perfectly and still not appear, because a filter set
+// earlier is hiding it. Saying so beats letting it look like a failed save.
+onFlashHidden(() => toast('Saved — a filter is hiding it. Clear the filters to see it.'));
 
 export function txSetFilter(key, value) {
   txFilters()[key] = value;
@@ -19,7 +24,7 @@ export function txSetFilter(key, value) {
 }
 
 export function txEdit(id) {
-  const monthKey = window.__txMonth || new Date().toISOString().slice(0, 7);
+  const monthKey = window.__txMonth || dayKey(new Date()).slice(0, 7);
   editing = id ? { ...findRow(id) } : blankTx(monthKey);
   if (!editing) { toast('Transaction not found'); return; }
   openModal(sheet(editing));
@@ -199,12 +204,13 @@ export async function txSave() {
   if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
 
   try {
-    await saveTransaction(t);
-    const month = String(t.postedAt).slice(0, 7);
-    await loadMonth(month, { force: true });
+    const saved = await saveTransaction(t);
+    const wasEdit = Boolean(editing.id);
     closeModal();
-    render();
-    toast(editing.id ? 'Transaction updated' : 'Transaction added');
+    // Marked before the repaint, so the row is drawn already highlighted.
+    flashRow(saved?.id ?? t.id);
+    await afterLedgerChange(String(t.postedAt).slice(0, 7));
+    toast(wasEdit ? 'Transaction updated' : 'Transaction added');
   } catch (err) {
     console.error('[tx]', err);
     if (btn) { btn.disabled = false; btn.textContent = 'Save'; }
@@ -217,9 +223,8 @@ export async function txDelete() {
   if (!confirm(`Delete "${editing.merchant || editing.merchantRaw}"?`)) return;
   try {
     await removeTransaction(editing);
-    await loadMonth(String(editing.postedAt).slice(0, 7), { force: true });
     closeModal();
-    render();
+    await afterLedgerChange(String(editing.postedAt).slice(0, 7));
     toast('Transaction deleted');
   } catch (err) {
     toast(`Could not delete: ${err.message}`);
@@ -230,7 +235,7 @@ export async function txDelete() {
 /* ------------------------------------------------ monthly exchange rate */
 
 export function txRateModal() {
-  const month = window.__txMonth || new Date().toISOString().slice(0, 7);
+  const month = window.__txMonth || dayKey(new Date()).slice(0, 7);
   const current = rateFor(month, 'USD');
 
   openModal(`
@@ -256,7 +261,9 @@ export function txRateModal() {
     try {
       await setMonthRate(month, 'USD', rate);
       closeModal();
-      render();
+      // The balances view converts foreign charges in SQL, so a new rate
+      // changes every figure on it, not just the transactions list.
+      await afterLedgerChange(month);
       toast(`Rate for ${month} set to ₡${rate}`);
     } catch (err) {
       btn.disabled = false; btn.textContent = 'Save';

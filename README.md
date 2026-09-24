@@ -43,7 +43,13 @@ Browser-level checks live in `tools/` and need the app running:
 node tools/smoke.mjs    http://localhost:4173/            # the five original views
 node tools/tx-smoke.mjs http://localhost:4173/            # the transactions view
 node tools/pwa-check.mjs http://localhost:4173/ app/dist  # install, offline, update
+node tools/refresh-check.mjs http://localhost:4173/       # does the screen follow the data
 ```
+
+`refresh-check.mjs` is the one that catches "I saved it and nothing happened".
+Server data lives in four separate caches, and a write that drops only its own
+leaves another view showing the figure it had before — every unit test passes,
+the number on screen is stale. Only a browser sees that.
 
 `pwa-check.mjs` needs the build directory as well as the URL: proving that an
 update reaches an installed app means publishing one, so it edits the served

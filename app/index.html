@@ -46,10 +46,16 @@
         <h2 id="viewTitle">Financial dashboard</h2>
         <div class="sub" id="viewSub"></div>
       </div>
-      <div class="month-pick">
-        <button class="iconbtn" id="prevMonth" title="Previous month">‹</button>
-        <select id="monthSel"></select>
-        <button class="iconbtn" id="nextMonth" title="Next month">›</button>
+      <div class="topbar-tools">
+        <div class="month-pick">
+          <button class="iconbtn" id="prevMonth" title="Previous month">‹</button>
+          <select id="monthSel"></select>
+          <button class="iconbtn" id="nextMonth" title="Next month">›</button>
+        </div>
+        <!-- Reloads the data, not the page: a page reload drops you back on
+             the dashboard and loses the month you were looking at. -->
+        <button class="iconbtn" id="refreshBtn" type="button"
+                title="Reload from the server" aria-label="Reload from the server">↻</button>
       </div>
     </div>
     <div id="views"></div>

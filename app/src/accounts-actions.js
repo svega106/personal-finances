@@ -7,15 +7,18 @@
  */
 import { openModal, closeModal, toast, render } from './app.js';
 import { getRepo } from './repo.js';
-import { getAccounts, loadMonth, loadReference, saveTransaction } from './tx.js';
-import { esc } from './views-tx.js';
+import { getAccounts, loadMonth, saveTransaction } from './tx.js';
+import { esc, dayKey } from './views-tx.js';
+import { afterLedgerChange, afterAccountChange } from './refresh.js';
 import {
   cachedBalances, invalidateAccounts, onWorkLoaded,
   workSelected, clearWorkSelection, setAllWorkSelected, pickWork,
 } from './views-accounts.js';
-import { loadWork, invalidateWork, cachedWork, settle, unsettle } from './work.js';
+import { cachedWork, settle, unsettle } from './work.js';
 
-const today = () => new Date().toISOString().slice(0, 10);
+// The Costa Rica day. An ISO slice would date a balance recorded after 6pm
+// as tomorrow's snapshot.
+const today = () => dayKey(new Date());
 const val = (id) => document.getElementById(id)?.value ?? '';
 
 function findBalance(accountId) {
@@ -249,13 +252,7 @@ export async function acctArchive(id) {
   });
 }
 
-/** The account list is loaded once at boot, so it has to be re-read. */
-async function refreshAccounts() {
-  await loadReference();
-  invalidateAccounts();
-  invalidateWork();
-  render();
-}
+const refreshAccounts = afterAccountChange;
 
 /* ------------------------------------------------------ work reimbursement */
 
@@ -353,9 +350,6 @@ async function applySettle(rows, on, { silent = false } = {}) {
   return true;
 }
 
-async function refreshWork() {
-  invalidateWork();
-  invalidateAccounts();
-  await loadWork({ force: true });
-  render();
-}
+// Settling writes to the charge itself, so it is a ledger change like any
+// other: the balances and the month on screen both have to be re-read.
+const refreshWork = () => afterLedgerChange();

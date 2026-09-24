@@ -16,7 +16,9 @@ import {
   acctSettleOne, acctSettleSelected, acctUnsettle,
 } from './accounts-actions.js';
 import { loadReference, loadMonth } from './tx.js';
-import { updateNavBadge } from './views-tx.js';
+import { updateNavBadge, dayKey } from './views-tx.js';
+import { refreshAll } from './refresh.js';
+import { toast } from './app.js';
 
 function showApp(email) {
   document.getElementById('gate').innerHTML = '';
@@ -37,6 +39,7 @@ function wire() {
   document.getElementById('monthSel').addEventListener('change', e => setCurrentMonth(e.target.value));
   document.getElementById('prevMonth').addEventListener('click', () => shiftCurrentMonth(-1));
   document.getElementById('nextMonth').addEventListener('click', () => shiftCurrentMonth(1));
+  document.getElementById('refreshBtn')?.addEventListener('click', doRefresh);
 
   window.setView = setView;
   window.render = render;
@@ -50,6 +53,39 @@ function wire() {
     acctUpdate, acctAdd, acctEdit, acctArchive, acctPickWork, acctSelectAllWork,
     acctSettleOne, acctSettleSelected, acctUnsettle,
   });
+}
+
+/**
+ * The refresh button.
+ *
+ * Held busy for a beat past the last response even when everything was
+ * already cached: a button that finishes before the eye registers the click
+ * reads as a button that did nothing.
+ */
+let refreshing = false;
+async function doRefresh() {
+  if (refreshing) return;
+  refreshing = true;
+
+  const btn = document.getElementById('refreshBtn');
+  btn?.classList.add('busy');
+  if (btn) btn.disabled = true;
+
+  const started = Date.now();
+  try {
+    await refreshAll();
+    toast('Up to date');
+  } catch (err) {
+    console.error('[refresh]', err);
+    toast(`Could not refresh: ${err.message}`);
+  } finally {
+    const held = Math.max(0, 450 - (Date.now() - started));
+    setTimeout(() => {
+      btn?.classList.remove('busy');
+      if (btn) btn.disabled = false;
+      refreshing = false;
+    }, held);
+  }
 }
 
 async function boot() {
@@ -95,7 +131,7 @@ async function boot() {
   setView('dashboard');
 
   // Populate the review badge without making the user open the view first.
-  loadMonth(new Date().toISOString().slice(0, 7))
+  loadMonth(dayKey(new Date()).slice(0, 7))
     .then(updateNavBadge)
     .catch(() => {});
 
