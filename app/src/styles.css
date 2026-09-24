@@ -66,6 +66,12 @@
   .g3{grid-template-columns:repeat(3,1fr)}
   .g2{grid-template-columns:repeat(2,1fr)}
   .g4{grid-template-columns:repeat(4,1fr)}
+  /* Between the phone layout and a full desktop the sidebar is still there,
+     so four stat cards get about 180px each — narrower than the figures they
+     hold, which pushed those views off the right edge. */
+  @media (min-width:761px) and (max-width:1080px){
+    .g3,.g4{grid-template-columns:repeat(2,1fr)}
+  }
   .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:20px}
   .card h3{margin:0 0 2px;font-size:13px;color:var(--muted);font-weight:650;text-transform:uppercase;letter-spacing:.6px}
   .stat{font-size:27px;font-weight:780;letter-spacing:-.5px;margin-top:6px}
@@ -95,6 +101,10 @@
 
   /* Plan form */
   .plan-grid{display:grid;grid-template-columns:1fr 360px;gap:20px;align-items:start}
+  /* A grid item will not shrink below its content unless told to, so one row
+     wider than the screen stretched the whole column and pushed every card
+     off the right edge. */
+  .plan-grid > *{min-width:0}
   @media(max-width:1080px){.plan-grid{grid-template-columns:1fr}}
   .field{margin-bottom:14px}
   .field label{display:block;font-size:12.5px;color:var(--muted);font-weight:600;margin-bottom:6px}
@@ -402,6 +412,70 @@
   .line-item-4,.li-head-4{grid-template-columns:1fr 84px 78px 34px}
   .line-item-4 > *:nth-child(4),
   .li-head-4 > *:nth-child(4){display:none}
+}
+
+/* ------------------------------------------------------ plan, on a phone */
+/*
+ * A plan row is a name and up to four controls. Held in one grid line at
+ * 390px it needed more width than the screen has, which is what dragged the
+ * whole view sideways — and squeezing it instead would leave every control
+ * too small to hit and the category select dropped entirely, so a line could
+ * not be marked essential or discretionary from a phone at all.
+ *
+ * So the row stops being one line. The name takes the full width, and what
+ * acts on it wraps underneath at a size a thumb can use.
+ */
+@media (max-width:620px){
+  .group{padding:14px}
+  /* A long heading and its total no longer fight for one line. */
+  .group > .row-between{flex-wrap:wrap;gap:4px 12px}
+  .group h4{font-size:14px;min-width:0}
+
+  /* The column headings label a row shape that no longer exists. */
+  .li-head,.li-head-4{display:none}
+
+  .line-item,.line-item-4,.goal-line{
+    display:flex;flex-wrap:wrap;gap:8px;align-items:center;
+    padding-bottom:11px;margin-bottom:11px;
+    border-bottom:1px solid var(--line);
+  }
+  /* Multi-line rows run together without something between them, but the
+     last one sits directly above its own Add button. */
+  .group > div:last-of-type > .line-item:last-child,
+  .line-item:last-of-type{border-bottom:0;margin-bottom:4px}
+
+  /* Line one is the name and the button that removes it — which belongs
+     beside the name anyway, and left to wrap on its own it sat alone on a
+     third line with a band of empty space above it. */
+  .line-item > *{order:2}
+  .line-item > *:first-child{order:1;flex:1 1 calc(100% - 46px)}
+  .line-item .del{order:1;flex:0 0 38px}
+  .line-item input[type=number]{flex:1 1 84px;min-width:0}
+  .line-item .cat{flex:1 1 110px;min-width:0}
+  /* The placeholder cell that stands in for an absent category select would
+     otherwise take a slot of its own in the flow. */
+  .line-item > span:empty{display:none}
+  /* And the category select, hidden by the rule above, is wanted back. */
+  .line-item-4 > *:nth-child(4){display:revert}
+
+  /* With the headings gone, the one figure that is not an input says what
+     it is. */
+  .line-item-4 .li-actual{flex:0 1 auto;text-align:left;padding:0 2px}
+  .line-item-4 .li-actual::before{
+    content:'spent ';color:var(--faint);font-size:10.5px;font-weight:600;
+    text-transform:uppercase;letter-spacing:.4px;
+  }
+
+  /* The goal row's second control is a suggestion to accept, not an amount
+     to read. Without the column heading, two figures side by side would not
+     say which is which. */
+  .goal-line .btn{flex:1 1 118px}
+  .goal-line .btn::before{
+    content:'suggested ';color:var(--faint);font-size:10.5px;font-weight:600;
+    text-transform:uppercase;letter-spacing:.4px;
+  }
+
+  .li-unmatched{flex-wrap:wrap}
 }
 
 /* ------------------------------------------------ work reimbursement list */

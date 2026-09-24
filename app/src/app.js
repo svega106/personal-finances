@@ -417,7 +417,7 @@ function renderPlan(){
   const goalRows = state.goals.length ? state.goals.map(g=>{
     const v = m.contributions[g.id]||'';
     const suggested = g.monthly||0;
-    return `<div class="line-item" style="grid-template-columns:1fr 130px 120px 34px">
+    return `<div class="line-item goal-line">
       <div style="font-size:13.5px;font-weight:600;display:flex;align-items:center;gap:8px"><span class="dot" style="background:var(--save)"></span>${esc(g.name)}</div>
       <input type="number" inputmode="numeric" value="${v}" placeholder="0" oninput="updContribution('${g.id}',this.value)">
       <button class="btn ghost sm" style="grid-column:span 1" onclick="updContribution('${g.id}',${suggested});render()" title="Suggested contribution">${suggested?money(suggested):'—'}</button>
