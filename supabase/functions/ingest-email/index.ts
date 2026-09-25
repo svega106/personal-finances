@@ -17,6 +17,7 @@ import { createClient } from 'jsr:@supabase/supabase-js@2';
 import { parseEmail } from '../_shared/parsers.js';
 import { matchRule } from '../_shared/classify.js';
 import { toTransactionRow, findAccount } from '../_shared/to-row.js';
+import { repairPostedAt } from '../_shared/repair.js';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_ROLE = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -43,13 +44,33 @@ const json = (body: unknown, status = 200) =>
 
 type Incoming = { id?: string; from: string; subject?: string; body?: string; html?: string };
 
+/**
+ * What a run is for.
+ *
+ *   import  — the normal path: write charges that are not in the table yet.
+ *   repair-dates — correct `posted_at` on charges that ARE in the table, from
+ *                  the email that brought them in. Nothing else is touched.
+ *
+ * The repair exists because the app's edit sheet once took a charge's date by
+ * slicing the UTC timestamp and wrote it back as noon, so every charge that
+ * was reviewed by hand lost the minute the bank recorded — and, for anything
+ * after 6pm Costa Rica, gained a day. The emails still hold the truth, and
+ * the parser already reads it correctly; the only reason an ordinary re-sync
+ * cannot fix this is `ignoreDuplicates`, which is there to protect exactly
+ * the hand edits that must be kept.
+ *
+ * So this updates one column and no other, matched on ext_id. A category, a
+ * renamed merchant, a reimbursement, an account correction: all untouched.
+ */
+type Mode = 'import' | 'repair-dates';
+
 Deno.serve(async (req: Request) => {
   if (req.method !== 'POST') return json({ error: 'POST only' }, 405);
   if (!secretOk(req.headers.get('x-ingest-secret') ?? '')) {
     return json({ error: 'unauthorized' }, 401);
   }
 
-  let payload: { messages?: Incoming[] };
+  let payload: { messages?: Incoming[]; mode?: string };
   try {
     payload = await req.json();
   } catch {
@@ -59,6 +80,8 @@ Deno.serve(async (req: Request) => {
   const messages = payload.messages ?? [];
   if (!Array.isArray(messages)) return json({ error: 'messages must be an array' }, 400);
   if (messages.length > 200) return json({ error: 'too many messages; send ≤200' }, 413);
+
+  const mode: Mode = payload.mode === 'repair-dates' ? 'repair-dates' : 'import';
 
   const db = createClient(SUPABASE_URL, SERVICE_ROLE, {
     auth: { persistSession: false, autoRefreshToken: false },
@@ -127,6 +150,27 @@ Deno.serve(async (req: Request) => {
     }));
   }
 
+  if (mode === 'repair-dates') {
+    // The decision lives in _shared/repair.js so it is covered by the same
+    // node tests as the parsers, rather than only by a deploy.
+    let result;
+    try {
+      result = await repairPostedAt(db, userId, rows);
+    } catch (err) {
+      return json({ error: (err as Error).message }, 500);
+    }
+
+    return json({
+      ok: true, mode,
+      received: messages.length,
+      parsed: rows.length,
+      repaired: result.changed.length,
+      alreadyCorrect: result.alreadyCorrect,
+      changed: result.changed,
+      skipped,
+    });
+  }
+
   let imported = 0;
   if (rows.length) {
     // ignoreDuplicates, NOT a plain upsert. A charge already in the table may
@@ -142,6 +186,7 @@ Deno.serve(async (req: Request) => {
 
   return json({
     ok: true,
+    mode,
     received: messages.length,
     imported,
     duplicates: rows.length - imported,

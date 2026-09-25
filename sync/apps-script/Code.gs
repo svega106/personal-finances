@@ -18,6 +18,11 @@
  *        INGEST_SECRET  the same value set as a Supabase secret
  *   3. Run `setUp` once and approve the Gmail permission prompt
  *   4. Triggers -> add trigger -> syncNow, time-driven, every 15 minutes
+ *
+ * Run by hand from the editor's Run menu when needed:
+ *   resyncLast30Days      re-offer a month of mail, e.g. after fixing a parser
+ *   repairDatesLast30Days put the real timestamps back on charges already
+ *                         stored, without touching anything else about them
  */
 
 /** Senders worth fetching. The parsers decide what is actually a charge. */
@@ -30,7 +35,10 @@ var SENDERS = [
 
 var PROPS = PropertiesService.getScriptProperties();
 var WATERMARK = 'lastSyncedEpoch';
-var BATCH = 50;
+// Threads per search. A normal run fetches the handful since the last one,
+// but a resync or a date repair asks for a month at a time, and BAC sends one
+// thread per charge — 50 would silently cut that short.
+var BATCH = 200;
 
 /** Run once by hand: grants Gmail access and sets the starting point. */
 function setUp() {
@@ -44,6 +52,22 @@ function setUp() {
 }
 
 function syncNow() {
+  run_('import', null, true);
+}
+
+/**
+ * Fetch a window of mail and post it.
+ *
+ * @param {string}  mode     'import' or 'repair-dates'
+ * @param {number?} since    epoch seconds; null uses the watermark
+ * @param {boolean} advance  whether a successful run moves the watermark
+ *
+ * A repair never advances it. The watermark's job is to say what has been
+ * offered for import, and a repair imports nothing — moving it would step
+ * over any charge in that window that had failed to import, which is the one
+ * thing this sync must never do quietly.
+ */
+function run_(mode, since, advance) {
   var url = PROPS.getProperty('INGEST_URL');
   var secret = PROPS.getProperty('INGEST_SECRET');
   if (!url || !secret) throw new Error('Set INGEST_URL and INGEST_SECRET in Script properties.');
@@ -61,8 +85,10 @@ function syncNow() {
     throw new Error('INGEST_URL should end in /functions/v1/ingest-email, got: ' + url);
   }
 
-  var since = Number(PROPS.getProperty(WATERMARK) || 0);
-  if (!since) since = Math.floor(Date.now() / 1000) - 30 * 86400;
+  if (since === null || since === undefined) {
+    since = Number(PROPS.getProperty(WATERMARK) || 0);
+    if (!since) since = Math.floor(Date.now() / 1000) - 30 * 86400;
+  }
 
   // One second of overlap on purpose: Gmail's `after:` is second-resolution,
   // so a message arriving in the same second as the last run could be missed.
@@ -103,42 +129,80 @@ function syncNow() {
     return;
   }
 
-  var res = UrlFetchApp.fetch(url, {
-    method: 'post',
-    contentType: 'application/json',
-    headers: { 'x-ingest-secret': secret },
-    payload: JSON.stringify({ messages: messages }),
-    muteHttpExceptions: true
-  });
+  // Posted in chunks: the ingest refuses more than 200 messages at once, and
+  // a month of mail can exceed that. A chunk that fails stops the run, so the
+  // watermark does not move past messages that were never offered.
+  var CHUNK = 100;
+  var totals = { imported: 0, duplicates: 0, unmatchedAccount: 0,
+                 repaired: 0, alreadyCorrect: 0 };
+  var failed = [];
+  var changed = [];
 
-  var code = res.getResponseCode();
-  var text = res.getContentText();
+  for (var c = 0; c < messages.length; c += CHUNK) {
+    var batch = messages.slice(c, c + CHUNK);
+    var res = UrlFetchApp.fetch(url, {
+      method: 'post',
+      contentType: 'application/json',
+      headers: { 'x-ingest-secret': secret },
+      payload: JSON.stringify({ messages: batch, mode: mode }),
+      muteHttpExceptions: true
+    });
 
-  // The watermark only moves on success. A failed run must re-fetch the same
-  // messages next time rather than skipping past them.
-  if (code !== 200) {
-    throw new Error('Ingest failed (' + code + '): ' + text.slice(0, 500));
+    var code = res.getResponseCode();
+    var text = res.getContentText();
+
+    // The watermark only moves on success. A failed run must re-fetch the
+    // same messages next time rather than skipping past them.
+    if (code !== 200) {
+      throw new Error('Ingest failed (' + code + ') on messages '
+        + (c + 1) + '-' + (c + batch.length) + ': ' + text.slice(0, 500));
+    }
+
+    var r;
+    try {
+      r = JSON.parse(text);
+    } catch (e) {
+      throw new Error('Ingest returned something that is not JSON: ' + text.slice(0, 300));
+    }
+
+    totals.imported += (r.imported || 0);
+    totals.duplicates += (r.duplicates || 0);
+    totals.unmatchedAccount += (r.unmatchedAccount || 0);
+    totals.repaired += (r.repaired || 0);
+    totals.alreadyCorrect += (r.alreadyCorrect || 0);
+    changed = changed.concat(r.changed || []);
+    failed = failed.concat((r.skipped || []).filter(function (x) {
+      return x.reason === 'parse-error';
+    }));
   }
 
-  PROPS.setProperty(WATERMARK, String(newest));
+  if (advance) PROPS.setProperty(WATERMARK, String(newest));
 
   // Say plainly what happened. A run that sends five charges and imports none
   // used to read as a success, because the POST returned 200.
   var summary;
-  try {
-    var r = JSON.parse(text);
-    var failed = (r.skipped || []).filter(function (s) { return s.reason === 'parse-error'; });
-    summary = 'sent ' + messages.length + ', imported ' + r.imported
-            + ', duplicates ' + r.duplicates;
-    if (r.unmatchedAccount) summary += ', ' + r.unmatchedAccount + ' with no matching card';
-    if (failed.length) {
-      summary += '\n*** ' + failed.length + ' COULD NOT BE PARSED — those charges are not in the app:';
-      failed.forEach(function (f) {
-        summary += '\n    ' + (f.issuer || '?') + ': ' + f.detail + '\n      saw: ' + (f.sample || '(no sample)');
-      });
+  if (mode === 'repair-dates') {
+    summary = 'sent ' + messages.length + ', dates corrected ' + totals.repaired
+            + ', already correct ' + totals.alreadyCorrect;
+    changed.slice(0, 40).forEach(function (x) {
+      summary += '\n    ' + x.merchant + ' -> ' + x.postedAt;
+    });
+    if (changed.length > 40) {
+      summary += '\n    ... and ' + (changed.length - 40) + ' more';
     }
-  } catch (e) {
-    summary = 'Sent ' + messages.length + '. Raw response: ' + text.slice(0, 500);
+  } else {
+    summary = 'sent ' + messages.length + ', imported ' + totals.imported
+            + ', duplicates ' + totals.duplicates;
+    if (totals.unmatchedAccount) {
+      summary += ', ' + totals.unmatchedAccount + ' with no matching card';
+    }
+  }
+  if (failed.length) {
+    summary += '\n*** ' + failed.length + ' COULD NOT BE PARSED — those charges are not in the app:';
+    failed.forEach(function (f) {
+      summary += '\n    ' + (f.issuer || '?') + ': ' + f.detail
+               + '\n      saw: ' + (f.sample || '(no sample)');
+    });
   }
   Logger.log(summary);
 }
@@ -184,9 +248,29 @@ function resyncLastDays(days) {
   syncNow();
 }
 
+/**
+ * Put the real timestamps back, from the emails that brought the charges in.
+ *
+ * The app's edit sheet once read a charge's date off the UTC timestamp and
+ * wrote it back as noon, so every charge reviewed by hand lost the minute the
+ * bank recorded — and anything after 6pm Costa Rica gained a day. This
+ * re-reads the mail and corrects `posted_at` and nothing else: categories,
+ * renamed merchants, reimbursements and account corrections are left exactly
+ * as they are.
+ *
+ * Safe to run more than once. The second run reports everything as already
+ * correct.
+ */
+function repairDates(days) {
+  run_('repair-dates', Math.floor(Date.now() / 1000) - (days || 30) * 86400, false);
+}
+
 // The editor's Run button cannot pass arguments — it calls the selected
 // function with none. These wrappers exist so a backfill can be run from the
 // dropdown without editing code.
 function resyncLast7Days()  { resyncLastDays(7); }
 function resyncLast30Days() { resyncLastDays(30); }
 function resyncLast90Days() { resyncLastDays(90); }
+
+function repairDatesLast30Days() { repairDates(30); }
+function repairDatesLast90Days() { repairDates(90); }

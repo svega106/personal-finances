@@ -57,6 +57,25 @@ update reaches an installed app means publishing one, so it edits the served
 files and puts them back.
 
 
+## Putting a wrong timestamp right
+
+`repairDatesLast30Days()` in the Apps Script re-reads a month of bank mail and
+corrects `posted_at` on charges that are already stored. It is the one path
+allowed to write over an existing row, so it writes exactly one column,
+matched on `ext_id`, and only where the value differs — a category, a renamed
+merchant, a reimbursement or a corrected account is not in the update at all.
+Safe to run twice; the second run reports everything as already correct.
+
+It exists because the app's edit sheet once took a charge's date by slicing
+the UTC timestamp and wrote it back as noon, so every charge reviewed by hand
+lost the minute the bank recorded and the late ones moved a day forward. An
+ordinary re-sync cannot fix that, because `ignoreDuplicates` is there to
+protect the hand edits.
+
+A repair never advances the watermark. The watermark says what has been
+offered for import, and a repair imports nothing — moving it would step over
+a charge in that window that had failed to import.
+
 ## How charges get in
 
 ```
