@@ -11,6 +11,8 @@ dist/
 .env.*.local
 
 # scratch
+# where the desktop app drops files sent into the chat
+Claude outputs/
 *.log
 fingerprint.json
 err.txt

@@ -6,6 +6,7 @@
  * Writes go nowhere. That is the point: nothing here should be mistaken for
  * persistence.
  */
+import { crDay } from './cr-date.js';
 export function createMemoryRepo(seed = {}) {
   const store = {
     months: structuredClone(seed.months ?? {}),
@@ -93,7 +94,7 @@ export function createMemoryRepo(seed = {}) {
           .filter((t) => t.status !== 'voided'
             && t.currency === a.currency
             && (t.accountId === a.id || t.counterpartyAccountId === a.id)
-            && (!last || String(t.postedAt).slice(0, 10) > last.asOf))
+            && (!last || crDay(t.postedAt) > last.asOf))
           .reduce((sum, t) => {
             if (t.kind === 'income' || t.kind === 'adjustment') return sum + t.amount;
             if (t.kind === 'transfer') {

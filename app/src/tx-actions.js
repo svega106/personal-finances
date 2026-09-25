@@ -8,7 +8,8 @@ import { openModal, closeModal, toast, render } from './app.js';
 import { getAccounts, accountById, matchRule, saveTransaction, removeTransaction, rateFor, setMonthRate, budgetLines } from './tx.js';
 import { getMonth, money } from './state.js';
 import { initialReimbursement } from './work.js';
-import { findRow, blankTx, CATS, esc, flashRow, dayKey, onFlashHidden } from './views-tx.js';
+import { findRow, blankTx, CATS, esc, flashRow, onFlashHidden } from './views-tx.js';
+import { crDay, crMonth, crNoon } from './cr-date.js';
 import { afterLedgerChange } from './refresh.js';
 import { txFilters } from './views-tx.js';
 
@@ -24,7 +25,7 @@ export function txSetFilter(key, value) {
 }
 
 export function txEdit(id) {
-  const monthKey = window.__txMonth || dayKey(new Date()).slice(0, 7);
+  const monthKey = window.__txMonth || crMonth(new Date());
   editing = id ? { ...findRow(id) } : blankTx(monthKey);
   if (!editing) { toast('Transaction not found'); return; }
   openModal(sheet(editing));
@@ -34,7 +35,10 @@ export function txEdit(id) {
 function sheet(t) {
   const accs = getAccounts();
   const isNew = !t.id;
-  const date = String(t.postedAt).slice(0, 10);
+  // The Costa Rica day, not the UTC one. Slicing the timestamp showed a 9pm
+  // charge as tomorrow — and since saving writes this field back, it moved
+  // the charge there and replaced the time it happened with noon.
+  const date = crDay(t.postedAt);
 
   return `
     <h3>${isNew ? 'Add expense' : 'Edit transaction'}</h3>
@@ -114,7 +118,7 @@ function sheet(t) {
  * offer September's plan.
  */
 function lineOptions(t) {
-  const monthKey = String(t.postedAt).slice(0, 7);
+  const monthKey = crMonth(t.postedAt);
   const lines = budgetLines(getMonth(monthKey));
 
   if (!lines.length) {
@@ -183,7 +187,12 @@ export async function txSave() {
     // Conversion is the month's job, not this row's.
     fxRate: null,
     amountCrc: currency === 'CRC' ? amount : null,
-    postedAt: `${val('tx_date')}T12:00:00-06:00`,
+    // The sheet offers a date, not a time. Rewriting an untouched date as
+    // noon would throw away the minute the bank recorded — so the instant is
+    // only rebuilt when the day actually changed.
+    postedAt: editing.postedAt && crDay(editing.postedAt) === val('tx_date')
+      ? editing.postedAt
+      : crNoon(val('tx_date')),
     accountId: val('tx_account') || null,
     cat: val('tx_cat') || null,
     budgetLineId: val('tx_line') || null,
@@ -209,7 +218,7 @@ export async function txSave() {
     closeModal();
     // Marked before the repaint, so the row is drawn already highlighted.
     flashRow(saved?.id ?? t.id);
-    await afterLedgerChange(String(t.postedAt).slice(0, 7));
+    await afterLedgerChange(crMonth(t.postedAt));
     toast(wasEdit ? 'Transaction updated' : 'Transaction added');
   } catch (err) {
     console.error('[tx]', err);
@@ -224,7 +233,7 @@ export async function txDelete() {
   try {
     await removeTransaction(editing);
     closeModal();
-    await afterLedgerChange(String(editing.postedAt).slice(0, 7));
+    await afterLedgerChange(crMonth(editing.postedAt));
     toast('Transaction deleted');
   } catch (err) {
     toast(`Could not delete: ${err.message}`);
@@ -235,7 +244,7 @@ export async function txDelete() {
 /* ------------------------------------------------ monthly exchange rate */
 
 export function txRateModal() {
-  const month = window.__txMonth || dayKey(new Date()).slice(0, 7);
+  const month = window.__txMonth || crMonth(new Date());
   const current = rateFor(month, 'USD');
 
   openModal(`

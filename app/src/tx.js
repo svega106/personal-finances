@@ -10,6 +10,7 @@
  * transaction is a deliberate action, not typing.
  */
 import { getRepo } from './repo.js';
+import { crMonth, CR_OFFSET } from './cr-date.js';
 import { matchRule as sharedMatchRule } from '../../supabase/functions/_shared/classify.js';
 
 /** month key -> transactions, so switching months back and forth is free. */
@@ -60,16 +61,16 @@ export async function setMonthRate(month, currency, rate) {
  */
 export function effectiveCrc(t) {
   if (t.currency === 'CRC') return t.amount;
-  const rate = rateFor(String(t.postedAt).slice(0, 7), t.currency);
+  const rate = rateFor(crMonth(t.postedAt), t.currency);
   return rate == null ? null : Math.round(t.amount * rate * 100) / 100;
 }
 
 /** Inclusive start, exclusive end — the month's bounds in local time. */
 function monthRange(key) {
   const [y, m] = key.split('-').map(Number);
-  const from = `${key}-01T00:00:00-06:00`;
+  const from = `${key}-01T00:00:00${CR_OFFSET}`;
   const next = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`;
-  return { from, to: `${next}-01T00:00:00-06:00` };
+  return { from, to: `${next}-01T00:00:00${CR_OFFSET}` };
 }
 
 export async function loadMonth(key, { force = false } = {}) {
@@ -87,7 +88,7 @@ export function cachedMonth(key) {
 function invalidate(key) { byMonth.delete(key); }
 
 export function monthKeyOf(tx) {
-  return String(tx.postedAt).slice(0, 7);
+  return crMonth(tx.postedAt);
 }
 
 /* --------------------------------------------------------------- writing */

@@ -8,6 +8,7 @@
  */
 import { getRepo } from './repo.js';
 import { accountById } from './tx.js';
+import { crMonth, CR_OFFSET } from './cr-date.js';
 
 /** Far enough back to cover a slow reimbursement, short enough to stay small. */
 const WINDOW_MONTHS = 18;
@@ -18,7 +19,7 @@ let loading = false;
 export function windowStart(now = new Date()) {
   const d = new Date(now);
   d.setMonth(d.getMonth() - WINDOW_MONTHS);
-  return `${d.toISOString().slice(0, 7)}-01T00:00:00-06:00`;
+  return `${crMonth(d)}-01T00:00:00${CR_OFFSET}`;
 }
 
 /** A charge counts as settled only when it says so. */

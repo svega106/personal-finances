@@ -44,6 +44,7 @@ node tools/smoke.mjs    http://localhost:4173/            # the five original vi
 node tools/tx-smoke.mjs http://localhost:4173/            # the transactions view
 node tools/pwa-check.mjs http://localhost:4173/ app/dist  # install, offline, update
 node tools/refresh-check.mjs http://localhost:4173/       # does the screen follow the data
+node tools/evening-charge.mjs                            # a 9pm charge, end to end
 ```
 
 `refresh-check.mjs` is the one that catches "I saved it and nothing happened".

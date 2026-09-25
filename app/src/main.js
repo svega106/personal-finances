@@ -16,7 +16,8 @@ import {
   acctSettleOne, acctSettleSelected, acctUnsettle,
 } from './accounts-actions.js';
 import { loadReference, loadMonth } from './tx.js';
-import { updateNavBadge, dayKey } from './views-tx.js';
+import { updateNavBadge } from './views-tx.js';
+import { crMonth } from './cr-date.js';
 import { refreshAll } from './refresh.js';
 import { toast } from './app.js';
 
@@ -131,7 +132,7 @@ async function boot() {
   setView('dashboard');
 
   // Populate the review badge without making the user open the view first.
-  loadMonth(dayKey(new Date()).slice(0, 7))
+  loadMonth(crMonth(new Date()))
     .then(updateNavBadge)
     .catch(() => {});
 

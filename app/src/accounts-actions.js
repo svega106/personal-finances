@@ -8,7 +8,8 @@
 import { openModal, closeModal, toast, render } from './app.js';
 import { getRepo } from './repo.js';
 import { getAccounts, loadMonth, saveTransaction } from './tx.js';
-import { esc, dayKey } from './views-tx.js';
+import { esc } from './views-tx.js';
+import { crDay } from './cr-date.js';
 import { afterLedgerChange, afterAccountChange } from './refresh.js';
 import { accountPatch } from './account-patch.js';
 import {
@@ -19,7 +20,7 @@ import { cachedWork, settle, unsettle } from './work.js';
 
 // The Costa Rica day. An ISO slice would date a balance recorded after 6pm
 // as tomorrow's snapshot.
-const today = () => dayKey(new Date());
+const today = () => crDay(new Date());
 const val = (id) => document.getElementById(id)?.value ?? '';
 
 function findBalance(accountId) {

@@ -5,6 +5,7 @@
  * skeleton first and fills it in. `render()` in app.js stays synchronous.
  */
 import { money, uid } from './state.js';
+import { crDay as dayKey, crMonth, crDayLabel as dayLabel, crTimeLabel as timeLabel, crNoon } from './cr-date.js';
 import {
   loadMonth, cachedMonth, getAccounts, accountById, matchRule,
   saveTransaction, removeTransaction, spendTotals, unreviewedCount,
@@ -27,33 +28,6 @@ function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, (m) => (
     { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]
   ));
-}
-
-/**
- * The Costa Rica calendar day a charge belongs to, as YYYY-MM-DD.
- *
- * Postgres returns `timestamptz` normalized to UTC, so slicing the string
- * gives the UTC date — and any charge after 6pm local is already "tomorrow"
- * there. That split one evening across two headings and sorted an 8pm charge
- * below a midday one. The day has to be computed in the zone the card was
- * actually used in.
- */
-function dayKey(iso) {
-  return new Date(iso).toLocaleDateString('en-CA', { timeZone: 'America/Costa_Rica' });
-}
-
-/** Takes the key from dayKey(), not a raw timestamp. */
-function dayLabel(key) {
-  // Noon, so the label cannot be dragged into the neighbouring day by an
-  // offset the way a bare `new Date('2026-09-21')` (UTC midnight) would be.
-  return new Date(`${key}T12:00:00-06:00`).toLocaleDateString('en-US', {
-    weekday: 'short', day: 'numeric', month: 'short', timeZone: 'America/Costa_Rica',
-  });
-}
-function timeLabel(iso) {
-  return new Date(iso).toLocaleTimeString('en-US', {
-    hour: '2-digit', minute: '2-digit', timeZone: 'America/Costa_Rica',
-  });
 }
 
 function displayName(t) {
@@ -330,13 +304,13 @@ export function blankTx(monthKey) {
   // anything entered after 6pm as tomorrow — and on the last evening of a
   // month, into the next month, where it is saved but invisible.
   const today = dayKey(new Date());
-  const thisMonth = today.slice(0, 7) === monthKey;
+  const thisMonth = crMonth(new Date()) === monthKey;
   const date = thisMonth ? today : `${monthKey}-01`;
   return {
     id: null,
     extId: `manual:${uid()}${Date.now().toString(36)}`,
     kind: 'expense',
-    postedAt: `${date}T12:00:00-06:00`,
+    postedAt: crNoon(date),
     merchantRaw: '',
     merchant: '',
     amount: 0,
