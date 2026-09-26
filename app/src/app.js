@@ -2,11 +2,13 @@ import {
   state, setState, save, uid, money, MONTHS, MONTHS_ABBR,
   DEFAULT_ALLOC, monthKey, monthLabel, shiftMonth, blankMonth, getMonth,
 } from './state.js';
-import { renderTransactions, updateNavBadge } from './views-tx.js';
+import { renderTransactions, amountCell, dayName } from './views-tx.js';
 import { renderAccounts } from './views-accounts.js';
-import { actualsFor } from './tx.js';
+import { actualsFor, cachedMonth, spendByDay } from './tx.js';
 import { healthScore } from './scoring.js';
-import { loadMonth, cachedMonth } from './tx.js';
+import { icon, merchantIcon, goalIconName, goalTint } from './icons.js';
+import { chartSlot, drawCharts, resetCharts, donut } from './charts.js';
+import { crDay, crMonth, crHour, crLongDate, crTimeLabel } from './cr-date.js';
 
 let currentMonth = monthKey();
 let annualYear = +currentMonth.slice(0,4);
@@ -83,30 +85,30 @@ function compute(key){
 }
 
 
-/* Advisor insights */
+/* Advisor insights. `icon` names an icon from icons.js. */
 function buildAdvice(c){
   const out = [];
   const a = state.settings.alloc;
-  if(c.income<=0){ out.push({cls:"warn",icon:"✱",t:"Start by entering your expected income for the month to get recommendations."}); return out; }
+  if(c.income<=0){ out.push({cls:"warn",icon:"sparkles",t:"Start by entering your expected income for the month to get recommendations."}); return out; }
   if(c.remaining<0){
-    out.push({cls:"bad",icon:"▲",t:`Your plan exceeds your income by <b>${money(-c.remaining)}</b>. Trim discretionary spending or adjust your goals.`});
+    out.push({cls:"bad",icon:"alert",t:`Your plan exceeds your income by <b>${money(-c.remaining)}</b>. Trim discretionary spending or adjust your goals.`});
   } else {
-    out.push({cls:"good",icon:"✓",t:`You have <b>${money(c.remaining)}</b> unassigned. Consider moving it into savings or investments.`});
+    out.push({cls:"good",icon:"check-circle",t:`You have <b>${money(c.remaining)}</b> unassigned. Consider moving it into savings or investments.`});
   }
   if(c.pSavings < a.savings){
     const gap = c.tSavings - c.savings;
-    out.push({cls:"warn",icon:"◈",t:`You're saving <b>${c.pSavings.toFixed(0)}%</b>. The target is ${a.savings}% — set aside <b>${money(gap)}</b> more to "pay yourself first".`});
+    out.push({cls:"warn",icon:"piggy",t:`You're saving <b>${c.pSavings.toFixed(0)}%</b>. The target is ${a.savings}% — set aside <b>${money(gap)}</b> more to "pay yourself first".`});
   } else {
-    out.push({cls:"good",icon:"◈",t:`You're saving <b>${c.pSavings.toFixed(0)}%</b> of your income. Above the ${a.savings}% target!`});
+    out.push({cls:"good",icon:"piggy",t:`You're saving <b>${c.pSavings.toFixed(0)}%</b> of your income. Above the ${a.savings}% target!`});
   }
   if(c.pNeeds > 60){
-    out.push({cls:"warn",icon:"⌂",t:`Your essentials are <b>${c.pNeeds.toFixed(0)}%</b> of income (ideal ≤${a.needs}%). Review fixed bills to free up room.`});
+    out.push({cls:"warn",icon:"home",t:`Your essentials are <b>${c.pNeeds.toFixed(0)}%</b> of income (ideal ≤${a.needs}%). Review fixed bills to free up room.`});
   }
   if(c.pWants > a.wants+5){
-    out.push({cls:"warn",icon:"☕",t:`Planned discretionary spending (<b>${c.pWants.toFixed(0)}%</b>) is above the recommended ${a.wants}%.`});
+    out.push({cls:"warn",icon:"coffee",t:`Planned discretionary spending (<b>${c.pWants.toFixed(0)}%</b>) is above the recommended ${a.wants}%.`});
   }
   if(c.netToPool>0 && c.remaining>=0){
-    out.push({cls:"good",icon:"🏦",t:`This month you'll add <b>${money(c.netToPool)}</b> to your net worth (projected balance ${money(c.closing)}).`});
+    out.push({cls:"good",icon:"trending-up",t:`This month you'll add <b>${money(c.netToPool)}</b> to your net worth (projected balance ${money(c.closing)}).`});
   }
   return out;
 }
@@ -115,30 +117,86 @@ function buildAdvice(c){
 const views = document.getElementById('views');
 let activeView = 'dashboard';
 
+export function getActiveView(){ return activeView; }
+
+/* ---- who is signed in, for the greeting and the avatar ---- */
+let user = { name: '', email: '', avatar: '' };
+
+export function setUser(u){ user = { ...user, ...u }; paintUser(); }
+
+function displayName(){ return String(state.settings?.name || user.name || '').trim(); }
+
+function initials(){
+  const n = displayName();
+  if (n) return n.split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
+  return (user.email || 'F')[0].toUpperCase();
+}
+
+function avatarInner(){
+  return `<span>${esc(initials())}</span>${user.avatar
+    ? `<img src="${esc(user.avatar)}" alt="" referrerpolicy="no-referrer" onerror="this.remove()">` : ''}`;
+}
+
+function paintUser(){
+  document.querySelectorAll('[data-avatar]').forEach((el) => { el.innerHTML = avatarInner(); });
+  const e = document.getElementById('acctEmail');
+  if (e) { e.textContent = displayName() || user.email || 'Demo data'; e.title = user.email || ''; }
+}
+
+function greeting(){
+  const h = crHour();
+  const part = h < 5 ? 'Good evening' : h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
+  const first = displayName().split(/\s+/)[0];
+  return first ? `${part}, ${first}` : part;
+}
+
+const HEADERS = {
+  dashboard: () => [greeting(), `Here's how ${monthLabel(currentMonth)} is going`, crLongDate()],
+  plan: () => ['Budget', `Plan ${monthLabel(currentMonth)}: what comes in, what goes out, what you keep`],
+  transactions: () => ['Activity', `Everything spent in ${monthLabel(currentMonth)}, by day`],
+  accounts: () => ['Accounts', 'What you have, what you owe, and what work owes you'],
+  goals: () => ['Goals', 'Track progress toward what you are saving for'],
+  annual: () => ['Year in review', `${annualYear}, month by month: totals and trends`],
+  settings: () => ['Settings', 'Appearance, budgeting strategy and your data'],
+};
+const TAB_NAMES = { dashboard:'Home', plan:'Budget', transactions:'Activity', accounts:'Accounts', goals:'Goals', annual:'Year in review', settings:'Settings' };
+
 function updateHeader(){
-  const titles = {
-    dashboard:["Financial dashboard","Your financial health at a glance"],
-    plan:["Monthly Plan — "+monthLabel(currentMonth),"Enter income and expenses; get your recommended budget"],
-    goals:["Savings Goals","Track progress toward your objectives"],
-    annual:["Annual Review — "+annualYear,"Each month's highlights, year-to-date totals and trends"],
-    transactions:["Transactions — "+monthLabel(currentMonth),"Everything spent this month, by day"],
-    accounts:["Accounts","What you have, what you owe, and what work owes you"],
-    settings:["Settings","Customize your budgeting strategy"]
-  };
-  document.getElementById('viewTitle').textContent = titles[activeView][0];
-  document.getElementById('viewSub').textContent = titles[activeView][1];
+  const [title, sub, eyebrow = ''] = HEADERS[activeView]();
+  document.getElementById('viewTitle').textContent = title;
+  document.getElementById('viewSub').textContent = sub;
+  document.getElementById('viewEyebrow').textContent = eyebrow;
+  document.title = activeView === 'dashboard' ? 'Finances' : `${TAB_NAMES[activeView]} · Finances`;
 }
 
 export function setView(v){
+  if(!HEADERS[v]) v = 'dashboard';
   activeView = v;
   if(v==='annual') annualYear = +currentMonth.slice(0,4);
-  document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('active',b.dataset.view===v));
+  document.querySelectorAll('#nav button[data-view], #tabbar button[data-view]')
+    .forEach(b=>b.classList.toggle('active',b.dataset.view===v));
+  const app = document.getElementById('app');
+  if (app) app.dataset.view = v;
+  window.scrollTo(0, 0);
   render();
+  enter();
+}
+
+/* A view arriving eases in. Navigation only: a repaint when data lands must
+   not move anything, so the class comes off once the animation is done. */
+let enterT;
+function enter(){
+  views.classList.remove('enter');
+  void views.offsetWidth;
+  views.classList.add('enter');
+  clearTimeout(enterT);
+  enterT = setTimeout(() => views.classList.remove('enter'), 450);
 }
 
 export function render(){
   updateHeader();
   if (typeof window !== 'undefined') window.__txMonth = currentMonth;
+  resetCharts();
   if(activeView==='dashboard') renderDashboard();
   else if(activeView==='plan') renderPlan();
   else if(activeView==='goals') renderGoals();
@@ -158,6 +216,32 @@ function renderMonthSelector(){
   sel.innerHTML = sorted.map(k=>`<option value="${k}" ${k===currentMonth?'selected':''}>${monthLabel(k)}</option>`).join('');
 }
 
+/* ---- shared pieces ---- */
+function tile({ ic, tone, label, value, foot = '', onclick = '' }){
+  return `<section class="card tile"${onclick ? ` role="button" tabindex="0" style="cursor:pointer" onclick="${onclick}" onkeydown="if(event.key==='Enter')this.click()"` : ''}>
+    <div class="tile-top"><span class="ti tone-${tone}">${icon(ic)}</span><h3>${label}</h3></div>
+    <div class="stat">${value}</div>
+    <div class="tile-foot">${foot}</div>
+  </section>`;
+}
+const pill = (text, cls) => `<span class="pill ${cls}">${text}</span>`;
+const TONE = { good: 'good', warn: 'warn', bad: 'bad' };
+
+function daysIn(key){ const [y,m] = key.split('-').map(Number); return new Date(y, m, 0).getDate(); }
+
+/** How far into a month today is: all of a past month, none of a future one. */
+function dayOfMonth(key){
+  const now = crMonth(new Date());
+  if (key < now) return daysIn(key);
+  if (key > now) return 0;
+  return Number(crDay(new Date()).split('-')[2]);
+}
+
+function monthName(key){ return MONTHS[+key.split('-')[1]-1]; }
+
+/** A goal's colour, from its place in the list. */
+const tintOf = (g) => goalTint(state.goals.indexOf(g));
+
 /* ---- Dashboard ---- */
 function renderDashboard(){
   const c = compute(currentMonth);
@@ -169,231 +253,432 @@ function renderDashboard(){
   // month should keep reading as a plan, not as "you have spent nothing".
   const hasActuals = !act.loading && act.count > 0;
   const spent = act.total;
-  const leftToSpend = c.planned - spent;
   const h = healthScore(c, hasActuals ? spent : 0);
+  const rows = cachedMonth(currentMonth) || [];
 
-  const segs = [
-    {k:'Essentials',v:c.needs,col:'var(--need)'},
-    {k:'Discretionary',v:c.wants,col:'var(--want)'},
-    {k:'Savings',v:c.goalsTotal,col:'var(--save)'},
-    {k:'Investing',v:c.invest,col:'var(--invest)'},
-  ];
-  const denom = Math.max(c.income, c.planned, 1);
-  const barHtml = segs.map(s=>`<i style="width:${(s.v/denom*100)}%;background:${s.col}"></i>`).join('')
-    + (c.remaining>0?`<i style="width:${(c.remaining/denom*100)}%;background:var(--surface2)"></i>`:'');
-  const legend = segs.map(s=>`<div><span class="dot" style="background:${s.col}"></span>${s.k} <b style="margin-left:4px">${money(s.v)}</b></div>`).join('')
-    + (c.remaining>0?`<div><span class="dot" style="background:var(--surface2)"></span>Unassigned <b style="margin-left:4px">${money(c.remaining)}</b></div>`:'');
+  const savingsTile = tile({ ic:'piggy', tone:'savings', label:'Savings + investing', value: money(c.savings),
+    foot: pill(`${c.pSavings.toFixed(0)}% of income`, c.pSavings>=a.savings?'good':'warn') });
+  const worthTile = tile({ ic:'trending-up', tone:'invest', label:'Net worth', value: money(c.netWorth),
+    foot: `${c.netToPool>=0?'+':''}${money(c.netToPool)} this month` });
+  const incomeTile = tile({ ic:'income', tone:'income', label:'Income this month', value: money(c.income),
+    foot: c.used>0 ? `incl. ${money(c.used)} from savings` : 'expected income' });
 
-  const ringCirc = 2*Math.PI*52;
-  const ringOff = ringCirc*(1-h.score/100);
-  const ringColor = h.cls==='good'?'var(--good)':h.cls==='warn'?'var(--warn)':'var(--bad)';
+  const kpis = hasActuals
+    ? [incomeTile, savingsTile, worthTile,
+       tile({ ic:'inbox', tone:'warn', label:'Needs review', value: money(act.uncategorized),
+         foot: act.uncategorized>0 ? pill('not categorized yet','warn') : pill('everything categorized','good'),
+         onclick: "setView('transactions')" })]
+    : [incomeTile,
+       tile({ ic:'receipt', tone:'needs', label:'Planned spending', value: money(c.planned), foot: `essentials ${money(c.needs)}` }),
+       savingsTile, worthTile];
 
-  function cfRow(name,val,target,col){
-    const max=Math.max(val,target,1);
-    return `<div class="cf-row">
-      <div>${name}</div>
-      <div class="cf-track"><i style="width:${val/max*100}%;background:${col}"></i></div>
-      <div style="text-align:right">${money(val)} <span class="faint" style="font-size:11px">/ ${money(target)}</span></div>
-    </div>`;
-  }
-
-  const goalsHtml = state.goals.length? state.goals.map(g=>{
-    const pct = g.target>0?Math.min(100,g.saved/g.target*100):0;
-    return `<div style="margin-bottom:14px">
-      <div class="row-between"><span style="font-weight:650;font-size:13.5px">${esc(g.name)}</span><span class="muted" style="font-size:12.5px">${pct.toFixed(0)}%</span></div>
-      <div class="prog"><i style="width:${pct}%"></i></div>
-      <div class="goal-meta"><span>${money(g.saved)}</span><span>of ${money(g.target)}</span></div>
-    </div>`;
-  }).join('') : `<div class="muted" style="font-size:13px">No goals yet. <a href="#" onclick="setView('goals');return false" style="color:var(--accent2)">Create one →</a></div>`;
+  // Two columns of their own rather than rows of pairs: these cards differ a
+  // lot in height, and a row is as tall as its tallest card. Each carries its
+  // place in the single column a phone shows them in.
+  const place = (card, order) => `<div style="--o:${order}">${card}</div>`;
+  const [left, right] = hasActuals
+    ? [[place(recentCard(rows), 1), place(allocationCard(c), 4), place(netWorthCard(c), 5)],
+       [place(goalsCard(), 2), place(targetsCard(c, act, true), 3), place(tipsCard(adv), 6)]]
+    : [[place(targetsCard(c, act, false), 1), place(netWorthCard(c), 4)],
+       [place(allocationCard(c), 2), place(goalsCard(), 3), place(tipsCard(adv), 5)]];
 
   views.innerHTML = `
-    <div class="grid g4" style="margin-bottom:4px">
-      ${statCard("Income this month", money(c.income), c.used>0?`incl. ${money(c.used)} from savings`:"expected income")}
-      ${hasActuals
-        ? statCard("Spent so far", money(spent),
-            `of ${money(c.planned)} planned · ${act.count} transaction${act.count===1?'':'s'}`,
-            spent > c.planned ? 'bad' : null)
-        : statCard("Planned spending", money(c.planned), `essentials ${money(c.needs)}`)}
-      ${hasActuals
-        ? statCard("Left to spend", money(leftToSpend),
-            leftToSpend >= 0 ? 'against this month\u2019s plan' : 'over the plan',
-            leftToSpend >= 0 ? 'good' : 'bad')
-        : statCard("Savings + investing", money(c.savings), `${c.pSavings.toFixed(0)}% of income`, c.pSavings>=a.savings?'good':'warn')}
-      ${hasActuals
-        ? statCard("Needs review", String(act.uncategorized>0 ? money(act.uncategorized) : money(0)),
-            act.uncategorized>0 ? 'not categorized yet' : 'everything categorized',
-            act.uncategorized>0 ? 'warn' : 'good')
-        : statCard("Available", money(c.remaining), c.remaining>=0?"unassigned":"over budget", c.remaining>=0?'good':'bad')}
+    <div class="dash-top">
+      ${heroCard(c, act, hasActuals)}
+      ${healthCard(h, hasActuals && spent > c.planned)}
     </div>
-
-    <div class="grid g2" style="margin-top:16px">
-      <div class="card">
-        <h3>Financial health</h3>
-        <div class="health" style="margin-top:14px">
-          <div class="ring">
-            <svg width="120" height="120">
-              <circle cx="60" cy="60" r="52" fill="none" stroke="var(--surface2)" stroke-width="11"/>
-              <circle cx="60" cy="60" r="52" fill="none" stroke="${ringColor}" stroke-width="11" stroke-linecap="round"
-                stroke-dasharray="${ringCirc}" stroke-dashoffset="${ringOff}"/>
-            </svg>
-            <div class="score"><b>${h.score}</b><span>of 100</span></div>
-          </div>
-          <div>
-            <span class="pill ${h.cls}">${h.label}</span>
-            <p class="muted" style="font-size:13px;margin:10px 0 0;max-width:230px">
-              ${hasActuals && spent > c.planned
-          ? 'Based on your savings rate, how well essentials are controlled, and whether you live within your income \u2014 measured against what you have actually spent, which is now past the plan.'
-          : 'Based on your savings rate, how well essentials are controlled, and whether you live within your income.'}
-            </p>
-          </div>
-        </div>
-      </div>
-      <div class="card">
-        <h3>Income allocation</h3>
-        <div class="alloc-bar" style="margin-top:16px">${barHtml}</div>
-        <div class="legend">${legend}</div>
-      </div>
-    </div>
-
-    <div class="grid g2" style="margin-top:16px">
-      <div class="card">
-        <h3>${hasActuals ? 'Actual spending vs. 50/30/20 target' : 'Cash flow vs. 50/30/20 target'}</h3>
-        ${hasActuals ? `<div class="muted" style="font-size:12px;margin-top:2px">
-          What you have really spent, not what you planned to.</div>` : ''}
-        <div class="cashflow-bar" style="margin-top:14px">
-          ${hasActuals ? `
-            ${cfRow("Essentials",act.needs,c.tNeeds,'var(--need)')}
-            ${cfRow("Discretionary",act.wants,c.tWants,'var(--want)')}
-            ${cfRow("Savings/Inv.",c.savings,c.tSavings,'var(--save)')}
-          ` : `
-            ${cfRow("Essentials",c.needs,c.tNeeds,'var(--need)')}
-            ${cfRow("Discretionary",c.wants,c.tWants,'var(--want)')}
-            ${cfRow("Savings/Inv.",c.savings,c.tSavings,'var(--save)')}
-          `}
-        </div>
-        ${hasActuals && act.uncategorized > 0 ? `
-        <div class="muted" style="font-size:12px;margin-top:12px;line-height:1.5">
-          ${money(act.uncategorized)} is not in any of these yet —
-          <a href="#" onclick="setView('transactions');return false" style="color:var(--accent2)">categorize it</a>
-          to see where it really lands.
-        </div>` : ''}
-        ${hasActuals && act.pendingCount > 0 ? `
-        <div class="muted" style="font-size:12px;margin-top:8px;line-height:1.5">
-          ${act.pendingCount} foreign charge${act.pendingCount===1?'':'s'} excluded — no exchange rate set for this month.
-        </div>` : ''}
-      </div>
-      <div class="card">
-        <h3>Goal progress</h3>
-        <div style="margin-top:14px">${goalsHtml}</div>
-      </div>
-    </div>
-
-    <div class="grid g2" style="margin-top:16px">
-      <div class="card" style="background:linear-gradient(165deg,rgba(52,211,153,.10),var(--surface))">
-        <div class="row-between"><h3>Accumulated net worth</h3><span class="pill ${c.netToPool>=0?'good':'bad'}">${c.netToPool>=0?'+':''}${money(c.netToPool)} this month</span></div>
-        <div class="stat" style="margin-top:8px;color:var(--save)">${money(c.closing)}</div>
-        <div class="muted" style="font-size:12px;margin-top:2px">Available savings after this month (unspent money, preserved)</div>
-        <div style="margin-top:14px">
-          <div class="kv"><span>Available at start of month</span><b>${money(c.carryAvailable)}</b></div>
-          <div class="kv"><span>Used as income this month</span><b>${money(c.used)}</b></div>
-          <div class="kv"><span>Added to net worth this month</span><b style="color:${c.netToPool>=0?'var(--good)':'var(--bad)'}">${c.netToPool>=0?'+':''}${money(c.netToPool)}</b></div>
-          <div class="kv"><span>Projected end-of-month balance</span><b>${money(c.closing)}</b></div>
-        </div>
-      </div>
-      <div class="card">
-        <h3>Total net worth</h3>
-        <div class="stat" style="margin-top:8px">${money(c.netWorth)}</div>
-        <div class="muted" style="font-size:12px;margin-top:2px">Accumulated savings + balance in your goals</div>
-        <div style="margin-top:14px">
-          <div class="kv"><span><span class="dot" style="background:var(--save);display:inline-block;margin-right:7px"></span>Available savings</span><b>${money(c.closing)}</b></div>
-          <div class="kv"><span><span class="dot" style="background:var(--invest);display:inline-block;margin-right:7px"></span>Saved in goals</span><b>${money(goalsSavedTotal())}</b></div>
-        </div>
-        <div class="muted" style="font-size:12px;margin-top:12px">Unspent money isn't lost between months: it accumulates here and you can use it whenever you need it.</div>
-      </div>
-    </div>
-
-    <div class="card" style="margin-top:16px">
-      <h3>Advisor tips</h3>
-      <div style="margin-top:8px">
-        ${adv.map(x=>`<div class="insight">
-          <div class="ic2" style="background:${x.cls==='good'?'rgba(52,211,153,.15)':x.cls==='bad'?'rgba(248,113,113,.15)':'rgba(251,191,36,.15)'};color:${x.cls==='good'?'var(--good)':x.cls==='bad'?'var(--bad)':'var(--warn)'}">${x.icon}</div>
-          <div class="tx">${x.t}</div>
-        </div>`).join('')}
-      </div>
-    </div>
-    ${c.income<=0?`<div style="text-align:center;margin-top:18px"><button class="btn" onclick="setView('plan')">Start planning this month →</button></div>`:''}
+    <div class="kpis">${kpis.join('')}</div>
+    ${hasActuals ? `<div class="dash-row r-8-4">${paceCard(c, rows)}${whereCard(act)}</div>` : ''}
+    <div class="dash-cols"><div class="stack">${left.join('')}</div><div class="stack">${right.join('')}</div></div>
   `;
+  drawCharts(views);
 }
 
-function statCard(label,val,sub,cls){
-  return `<div class="card">
-    <h3>${label}</h3>
-    <div class="stat">${val}</div>
-    <div class="muted" style="font-size:12px;margin-top:3px">${cls?`<span class="pill ${cls}" style="font-size:11px">${sub}</span>`:sub}</div>
-  </div>`;
+/**
+ * The figure the dashboard leads with. What it is depends on what the month
+ * has: real spending against a plan, spending with no plan, a plan with no
+ * spending yet, or nothing at all.
+ */
+function heroCard(c, act, hasActuals){
+  const name = monthName(currentMonth);
+  if (hasActuals && c.planned > 0) {
+    const spent = act.total;
+    const left = c.planned - spent;
+    const pct = Math.min(100, spent / c.planned * 100);
+    const days = daysIn(currentMonth);
+    const isNow = currentMonth === crMonth(new Date());
+    const daysLeft = isNow ? days - dayOfMonth(currentMonth) + 1 : 0;
+    const perDay = daysLeft > 0 && left > 0 ? left / daysLeft : 0;
+    return `<section class="hero">
+      <div class="hero-label">${icon('wallet')}Left to spend in ${name}</div>
+      <div class="hero-value">${money(left)}</div>
+      <div class="hero-sub"><b>${money(spent)}</b> spent of ${money(c.planned)} planned${left < 0 ? ` &nbsp;${pill(`${icon('alert')}over the plan`, '')}` : ''}</div>
+      <div class="hero-bar${left < 0 ? ' over' : ''}"><i style="width:${pct}%"></i></div>
+      <div class="hero-stats">
+        <div><span>Transactions</span><b>${act.count}</b></div>
+        ${daysLeft ? `<div><span>Days left</span><b>${daysLeft}</b></div>` : ''}
+        ${perDay ? `<div><span>Per day</span><b>${money(perDay)}</b></div>` : ''}
+      </div>
+    </section>`;
+  }
+  if (hasActuals) {
+    return `<section class="hero">
+      <div class="hero-label">${icon('activity')}Spent in ${name}</div>
+      <div class="hero-value">${money(act.total)}</div>
+      <div class="hero-sub">${act.count} transaction${act.count===1?'':'s'} · there is no plan for ${name} yet</div>
+      <div style="margin-top:18px"><button class="btn on-hero" onclick="setView('plan')">${icon('budget')}Plan this month</button></div>
+    </section>`;
+  }
+  if (c.income > 0) {
+    const pct = Math.min(100, c.planned / c.income * 100);
+    return `<section class="hero">
+      <div class="hero-label">${icon('coins')}Available to assign in ${name}</div>
+      <div class="hero-value">${money(c.remaining)}</div>
+      <div class="hero-sub"><b>${money(c.planned)}</b> planned of ${money(c.income)} income</div>
+      <div class="hero-bar${c.remaining < 0 ? ' over' : ''}"><i style="width:${pct}%"></i></div>
+      <div class="hero-stats">
+        <div><span>Essentials</span><b>${money(c.needs)}</b></div>
+        <div><span>Discretionary</span><b>${money(c.wants)}</b></div>
+        <div><span>Saving</span><b>${money(c.savings)}</b></div>
+      </div>
+    </section>`;
+  }
+  return `<section class="hero">
+    <div class="hero-label">${icon('sparkles')}${monthLabel(currentMonth)}</div>
+    <div class="hero-value" style="font-size:32px">Plan your month</div>
+    <div class="hero-sub">Enter what you expect to earn and spend, and the advisor will suggest a budget that pays you first.</div>
+    <div style="margin-top:18px"><button class="btn on-hero" onclick="setView('plan')">${icon('arrow-right')}Start planning ${name}</button></div>
+  </section>`;
+}
+
+function healthCard(h, over){
+  const R = 52, C = 2*Math.PI*R;
+  const off = C*(1-h.score/100);
+  const col = h.cls==='good'?'var(--pos-mark)':h.cls==='warn'?'var(--warn-mark)':'var(--neg-mark)';
+  return `<section class="card">
+    <div class="card-head"><h3>Financial health</h3>${pill(h.label, h.cls)}</div>
+    <div class="health">
+      <div class="ring">
+        <svg width="100%" height="100%" viewBox="0 0 124 124" aria-hidden="true">
+          <circle cx="62" cy="62" r="${R}" fill="none" style="stroke:var(--surface-3)" stroke-width="12"/>
+          <circle cx="62" cy="62" r="${R}" fill="none" style="stroke:${col}" stroke-width="12" stroke-linecap="round"
+            stroke-dasharray="${C}" stroke-dashoffset="${off}"/>
+        </svg>
+        <div class="score"><b>${h.score}</b><span>of 100</span></div>
+      </div>
+      <p>${over
+        ? 'Based on your savings rate, how well essentials are controlled, and whether you live within your income — measured against what you have actually spent, which is now past the plan.'
+        : 'Based on your savings rate, how well essentials are controlled, and whether you live within your income.'}</p>
+    </div>
+  </section>`;
+}
+
+function paceCard(c, rows){
+  const days = daysIn(currentMonth);
+  const upto = dayOfMonth(currentMonth);
+  const byDay = spendByDay(rows);
+  const cum = [];
+  let run = 0;
+  for (let d = 1; d <= upto; d += 1) {
+    run += byDay[`${currentMonth}-${String(d).padStart(2, '0')}`] || 0;
+    cum.push(run);
+  }
+  const pace = c.planned * upto / days;
+  const diff = pace - run;
+  const status = c.planned > 0 && upto > 0
+    ? (diff >= 0
+      ? pill(`${icon('trending-down')}${money(diff)} under pace`, 'good')
+      : pill(`${icon('trending-up')}${money(-diff)} over pace`, 'warn'))
+    : '';
+  return `<section class="card">
+    <div class="card-head">
+      <div><h3>Spending pace</h3><div class="card-sub">Spent so far, against an even pace to ${money(c.planned)}</div></div>
+      ${status}
+    </div>
+    ${chartSlot('pace', { days, cum, planned: c.planned, month: currentMonth }, {
+      height: 210,
+      label: `Spending pace: ${money(run)} spent by day ${upto} of ${days}, against ${money(pace)} at an even pace.`,
+    })}
+    <div class="chart-foot">
+      <span><i class="key-line"></i>Spent</span>
+      ${c.planned > 0 ? '<span><i class="key-line dashed"></i>Even pace to the plan</span>' : ''}
+    </div>
+  </section>`;
+}
+
+function whereCard(act){
+  const segs = [
+    { tone:'needs', label:'Essentials', value: act.needs },
+    { tone:'wants', label:'Discretionary', value: act.wants },
+    { tone:'savings', label:'Savings', value: act.savings },
+    { tone:'none', label:'Uncategorized', value: act.uncategorized },
+  ];
+  const total = act.total || 1;
+  const legend = segs.filter(s=>s.value>0).map(s=>`
+    <div class="legend-item tone-${s.tone}">
+      <span class="li-l"><span class="swatch"></span>${s.label}</span>
+      <span class="li-v"><b>${money(s.value)}</b><span class="pct">${Math.round(s.value/total*100)}%</span></span>
+    </div>`).join('');
+  return `<section class="card where">
+    <div class="card-head"><div><h3>Where it went</h3><div class="card-sub">Personal spending by category</div></div></div>
+    <div class="donut-wrap">
+      ${donut(segs, { value: money(act.total), label: 'spent' })}
+      <div class="legend rows" style="flex:1;margin:0;min-width:0">${legend || '<span class="muted">Nothing spent yet.</span>'}</div>
+    </div>
+    ${act.uncategorized > 0 ? `<div class="card-note">${money(act.uncategorized)} is not in any category yet —
+      <button class="linkbtn" onclick="setView('transactions')">categorize it</button> to see where it really lands.</div>` : ''}
+    ${act.pendingCount > 0 ? `<div class="card-note">${act.pendingCount} foreign charge${act.pendingCount===1?'':'s'} excluded — no exchange rate set for this month.</div>` : ''}
+  </section>`;
+}
+
+function recentCard(rows){
+  const list = rows.filter((t) => t.status !== 'voided')
+    .sort((x, y) => new Date(y.postedAt) - new Date(x.postedAt))
+    .slice(0, 5);
+  const item = (t) => `
+    <div class="item tap" role="button" tabindex="0" onclick="txEdit('${esc(t.id)}')" onkeydown="if(event.key==='Enter')this.click()">
+      ${merchantIcon(t, { size: 'sm' })}
+      <div class="item-main">
+        <div class="item-title"><span class="t">${esc(t.merchant || t.merchantRaw || '(no merchant)')}</span>${t.reviewed ? '' : '<span class="tx-dot" title="Not reviewed"></span>'}</div>
+        <div class="item-sub">${dayName(crDay(t.postedAt), { short: true })} · ${crTimeLabel(t.postedAt)}</div>
+      </div>
+      ${amountCell(t)}
+    </div>`;
+  return `<section class="card recent">
+    <div class="card-head" style="margin-bottom:2px">
+      <h3>Recent activity</h3>
+      <button class="card-link" onclick="setView('transactions')">See all${icon('chevron-right')}</button>
+    </div>
+    ${list.length ? list.map(item).join('') : '<div class="list-empty">No transactions this month yet.</div>'}
+  </section>`;
+}
+
+function goalsCard(){
+  const body = state.goals.length ? state.goals.slice(0, 4).map(g=>{
+    const pct = g.target>0?Math.min(100,g.saved/g.target*100):0;
+    const tint = tintOf(g);
+    return `<div class="goal-mini">
+      <div class="goal-mini-top"><span class="gi tone-${tint}">${icon(goalIconName(g))}</span><span class="gname">${esc(g.name)}</span><span class="gpct">${pct.toFixed(0)}%</span></div>
+      <div class="meter"><i class="tone-${tint}" style="width:${pct}%"></i></div>
+      <div class="goal-mini-meta"><span>${money(g.saved)}</span><span>of ${money(g.target)}</span></div>
+    </div>`;
+  }).join('') : `<div class="empty" style="padding:18px 0 6px">
+      <div class="empty-ic">${icon('target')}</div>
+      <p>No goals yet.</p>
+      <button class="btn soft sm" onclick="setView('goals')">${icon('plus')}Create one</button>
+    </div>`;
+  return `<section class="card">
+    <div class="card-head" style="margin-bottom:4px">
+      <h3>Goal progress</h3>
+      ${state.goals.length ? `<button class="card-link" onclick="setView('goals')">All goals${icon('chevron-right')}</button>` : ''}
+    </div>
+    ${body}
+  </section>`;
+}
+
+function targetsCard(c, act, hasActuals){
+  const a = state.settings.alloc;
+  const rows = hasActuals
+    ? [['needs','Essentials',act.needs,c.tNeeds],['wants','Discretionary',act.wants,c.tWants],['savings','Savings / investing',c.savings,c.tSavings]]
+    : [['needs','Essentials',c.needs,c.tNeeds],['wants','Discretionary',c.wants,c.tWants],['savings','Savings / investing',c.savings,c.tSavings]];
+  const body = rows.map(([k,name,val,target])=>{
+    const max = Math.max(val, target, 1);
+    return `<div class="target-row">
+      <div class="target-top">
+        <span class="target-name"><span class="swatch tone-${k}"></span>${name}</span>
+        <span class="target-vals"><b>${money(val)}</b> / ${money(target)}</span>
+      </div>
+      <div class="meter"><i class="tone-${k}" style="width:${val/max*100}%"></i>${target>0?`<span class="mark" style="left:${target/max*100}%" title="Target ${money(target)}"></span>`:''}</div>
+    </div>`;
+  }).join('');
+  return `<section class="card">
+    <div class="card-head"><div>
+      <h3>${hasActuals ? 'Actual spending vs. target' : 'Plan vs. target'}</h3>
+      <div class="card-sub">${hasActuals ? 'What you have really spent, not what you planned to' : 'Your plan, against the split you are aiming for'}</div>
+    </div></div>
+    ${body}
+    <div class="chart-foot"><span><i style="display:inline-block;width:2px;height:12px;border-radius:2px;background:var(--text);opacity:.75"></i>Target for a ${a.needs}/${a.wants}/${a.savings} split</span></div>
+  </section>`;
+}
+
+function allocationCard(c){
+  const segs = [['needs','Essentials',c.needs],['wants','Discretionary',c.wants],['savings','Savings',c.goalsTotal],['invest','Investing',c.invest]];
+  const bar = segs.filter(s=>s[2]>0).map(([k,l,v])=>`<i class="tone-${k}" style="flex:${v} 1 0" title="${l}: ${money(v)}"></i>`).join('')
+    + (c.remaining>0?`<i class="rest" style="flex:${c.remaining} 1 0" title="Unassigned: ${money(c.remaining)}"></i>`:'');
+  const legend = segs.map(([k,l,v])=>`<div class="legend-item tone-${k}"><span class="swatch"></span>${l} <b>${money(v)}</b></div>`).join('')
+    + (c.remaining>0?`<div class="legend-item"><span class="swatch" style="background:var(--surface-3)"></span>Unassigned <b>${money(c.remaining)}</b></div>`:'');
+  return `<section class="card">
+    <div class="card-head"><div><h3>Income allocation</h3><div class="card-sub">Where the plan puts ${money(c.income)} of income</div></div></div>
+    <div class="stackbar">${bar || '<i class="rest" style="flex:1 1 0"></i>'}</div>
+    <div class="legend">${legend}</div>
+  </section>`;
+}
+
+function netWorthCard(c){
+  const up = c.netToPool >= 0;
+  return `<section class="card">
+    <div class="card-head">
+      <div><h3>Net worth</h3><div class="card-sub">Accumulated savings plus what is in your goals</div></div>
+      ${pill(`${up?'+':''}${money(c.netToPool)} this month`, up?'good':'bad')}
+    </div>
+    <div class="nw-big">${money(c.netWorth)}</div>
+    <div class="kv"><span><span class="swatch tone-savings" style="display:inline-block;margin-right:8px"></span>Available savings</span><b>${money(c.closing)}</b></div>
+    <div class="kv"><span><span class="swatch tone-invest" style="display:inline-block;margin-right:8px"></span>Saved in goals</span><b>${money(goalsSavedTotal())}</b></div>
+    <div class="card-sub" style="margin:16px 0 2px;font-weight:600;color:var(--text-2)">This month's savings pool</div>
+    <div class="kv"><span>Available at start of month</span><b>${money(c.carryAvailable)}</b></div>
+    <div class="kv"><span>Used as income this month</span><b>${money(c.used)}</b></div>
+    <div class="kv"><span>Added this month</span><b class="${up?'pos':'neg'}">${up?'+':''}${money(c.netToPool)}</b></div>
+    <div class="kv"><span>Projected end-of-month balance</span><b>${money(c.closing)}</b></div>
+    <div class="card-note">Unspent money isn't lost between months: it accumulates here and you can use it whenever you need it.</div>
+  </section>`;
+}
+
+function tipsCard(adv){
+  return `<section class="card tips">
+    <div class="card-head" style="margin-bottom:2px"><h3>Advisor tips</h3></div>
+    ${adv.map(x=>`<div class="tip-item"><span class="tip-ic tone-${TONE[x.cls]}">${icon(x.icon)}</span><div>${x.t}</div></div>`).join('')}
+  </section>`;
 }
 
 /* ---- Plan ---- */
+
+/**
+ * Only two things here are worth a colour: you have gone over a line, or
+ * you are within a whisker of it.
+ *
+ * Under-spending is deliberately left uncoloured. Half the lines are under
+ * on the 9th of the month purely because the month is not over, so painting
+ * them green would be congratulating you for the calendar.
+ */
+function overClass(planned, spent){
+  if(!planned || !spent) return '';
+  if(spent > planned) return ' li-over';
+  if(spent >= planned*0.9) return ' li-close';
+  return '';
+}
+
+/**
+ * How a line's spending compares with what was planned for it.
+ * Nothing planned and nothing spent reads as neither good nor bad.
+ */
+function spentCell(act, id, planned){
+  if(act.loading) return `<div class="line-spent"><span class="li-actual loading muted">…</span></div>`;
+  const spent = act.byLine[id] || 0;
+  if(!spent) return `<div class="line-spent"><span class="li-actual li-none">—</span></div>`;
+  const pct = planned > 0 ? Math.min(100, spent/planned*100) : 100;
+  const tone = planned && spent > planned ? 'bad' : planned && spent >= planned*0.9 ? 'warn' : 'accent';
+  return `<div class="line-spent">
+    <span class="li-actual"><b>${money(spent)}</b>${planned ? ` <span class="faint">· ${Math.round(spent/planned*100)}%</span>` : ''}</span>
+    <div class="meter thin"><i class="tone-${tone}" style="width:${pct}%"></i></div>
+  </div>`;
+}
+
+function moneyInput(v, handler, { label = 'Amount', attrs = '' } = {}){
+  return `<label class="money-inp"><span>₡</span><input type="number" inputmode="numeric" value="${v||''}" placeholder="0" aria-label="${label}" oninput="${handler}"${attrs}></label>`;
+}
+
+function groupTotals(m, c){
+  const sum = (arr) => arr.reduce((s,x)=>s+(+x.amount||0),0);
+  return { income: c.earned, extra: c.extra, bills: c.billsTotal, recurring: sum(m.recurring), oneTime: sum(m.oneTime), goals: c.goalsTotal, invest: c.invest };
+}
+
+function group({ ic, tone, title, total, desc = '', body }){
+  return `<section class="card group">
+    <div class="group-head">
+      <span class="gi tone-${tone}">${icon(ic)}</span>
+      <h4>${title}</h4>
+      ${total ? `<span class="group-total" data-total="${total[0]}">${money(total[1])}</span>` : ''}
+    </div>
+    ${desc ? `<p class="group-desc">${desc}</p>` : ''}
+    <div class="group-body">${body}</div>
+  </section>`;
+}
+
+function planSummaryInner(c){
+  const segs = [['needs','Essentials',c.needs],['wants','Discretionary',c.wants],['savings','Savings',c.goalsTotal],['invest','Investing',c.invest]];
+  const bar = segs.filter(s=>s[2]>0).map(([k,l,v])=>`<i class="tone-${k}" style="flex:${v} 1 0" title="${l}: ${money(v)}"></i>`).join('')
+    + (c.remaining>0?`<i class="rest" style="flex:${c.remaining} 1 0" title="Unassigned: ${money(c.remaining)}"></i>`:'');
+  return `<div class="ps-top">
+      <div><div class="ps-label">Unassigned this month</div><div class="ps-value${c.remaining<0?' neg':''}">${money(c.remaining)}</div></div>
+      <div class="ps-side">
+        <div><span>Income</span><b>${money(c.income)}</b></div>
+        <div><span>Planned</span><b>${money(c.planned)}</b></div>
+      </div>
+    </div>
+    <div class="stackbar">${bar || '<i class="rest" style="flex:1 1 0"></i>'}</div>
+    <div class="legend">${segs.map(([k,l,v])=>`<div class="legend-item tone-${k}"><span class="swatch"></span>${l} <b>${money(v)}</b></div>`).join('')}</div>`;
+}
+
+function planStickyInner(c){
+  return `<span>Unassigned</span><b class="${c.remaining<0?'neg':''}">${money(c.remaining)}</b><span>of ${money(c.income)}</span>`;
+}
+
+function usedNote(c){ return `Using <b>${money(c.used)}</b> of your accumulated savings.`; }
+function surplusNote(c){ return `This month's surplus (<b>${money(Math.max(0,c.netToPool))}</b>) will automatically be added to your accumulated savings.`; }
+
+function recoLine(name,key,pct,target,actual){
+  let cls, status;
+  if(key==='savings'){ cls = actual>=target?'good':'warn'; status = actual>=target ? 'on target' : 'below target'; }
+  else { cls = actual<=target*1.05?'good':'warn'; status = actual<=target*1.05 ? 'within target' : 'over target'; }
+  const max = Math.max(target, actual, 1);
+  return `<div class="reco">
+    <div class="reco-top">
+      <span class="reco-name"><span class="swatch tone-${key}"></span>${name} <small>${pct}%</small></span>
+      ${pill(status, cls)}
+    </div>
+    <div class="meter thin"><i class="tone-${key}" style="width:${actual/max*100}%"></i>${target>0?`<span class="mark" style="left:${target/max*100}%"></span>`:''}</div>
+    <div class="reco-vals" style="margin-top:7px"><b>${money(actual)}</b> of ${money(target)} target</div>
+  </div>`;
+}
+
+function advisorHtml(c){
+  const a = state.settings.alloc;
+  return `
+    <div class="card-head"><div><h3>Recommended budget</h3><div class="card-sub">${a.needs}/${a.wants}/${a.savings} strategy · pay yourself first</div></div></div>
+    <div class="kv"><span>Total income</span><b>${money(c.income)}</b></div>
+    ${recoLine("Essentials",'needs',a.needs,c.tNeeds,c.needs)}
+    ${recoLine("Discretionary",'wants',a.wants,c.tWants,c.wants)}
+    ${recoLine("Savings + investing",'savings',a.savings,c.tSavings,c.savings)}
+    <div class="remain-box">
+      <div class="lbl">Unassigned available</div>
+      <div class="big-remain ${c.remaining<0?'neg':c.remaining>0?'pos':''}">${money(c.remaining)}</div>
+      <p>After essentials + savings you have <b>${money(c.afterNeedsSavings)}</b> to spend freely.</p>
+    </div>
+    ${buildAdvice(c).slice(0,3).map(x=>`<div class="advice"><span class="tip-ic tone-${TONE[x.cls]}">${icon(x.icon)}</span><span>${x.t}</span></div>`).join('')}`;
+}
+
 function renderPlan(){
   const m = getMonth(currentMonth);
   const c = compute(currentMonth);
-  const a = state.settings.alloc;
 
   // What was actually spent this month, by plan line. Loads in the background
   // the first time and re-renders, so this stays a synchronous view.
   const act = actualsFor(currentMonth, render);
-
-  /**
-   * How a line's spending compares with what was planned for it.
-   * Nothing planned and nothing spent reads as neither good nor bad.
-   */
-  function spentCell(id){
-    if(act.loading) return `<span class="li-actual muted">…</span>`;
-    const spent = act.byLine[id] || 0;
-    if(!spent) return `<span class="li-actual li-none">—</span>`;
-    return `<span class="li-actual">${money(spent)}</span>`;
-  }
-
-  /**
-   * Only two things here are worth a colour: you have gone over a line, or
-   * you are within a whisker of it.
-   *
-   * Under-spending is deliberately left uncoloured. Half the lines are under
-   * on the 9th of the month purely because the month is not over, so painting
-   * them green would be congratulating you for the calendar.
-   */
-  function overClass(planned, spent){
-    if(!planned || !spent) return '';
-    if(spent > planned) return ' li-over';
-    if(spent >= planned*0.9) return ' li-close';
-    return '';
-  }
+  const totals = groupTotals(m, c);
 
   /**
    * `withSpent` is off for income: money coming in has nothing to compare
    * against a plan line, and a "Spent" column beside it just reads as broken.
    */
   function itemRows(arr,kind,withCat,withSpent=true){
-    const cls = withSpent ? ' li-head-4' : '';
-    const rowCls = withSpent ? ' line-item-4' : '';
-    const head = withSpent
-      ? `<div class="li-head${cls}"><span>Item</span><span>Planned</span><span>Spent</span>${withCat?'<span>Type</span>':'<span></span>'}<span></span></div>`
-      : `<div class="li-head"><span>Item</span><span>Amount</span>${withCat?'<span>Type</span>':'<span></span>'}<span></span></div>`;
+    const mods = `${withSpent?' has-spent':''}${withCat?' has-cat':''}`;
+    const head = `<div class="li-head${mods}"><span>Item</span><span class="r">${withSpent?'Planned':'Amount'}</span>${withSpent?'<span class="r">Spent</span>':''}${withCat?'<span>Type</span>':''}<span></span></div>`;
     const rows = arr.map((it,i)=>{
       const spent = act.byLine[it.id]||0;
+      const planned = +it.amount||0;
       return `
-      <div class="line-item${rowCls}${withSpent?overClass(+it.amount||0, spent):''}">
-        <input value="${esc(it.name||'')}" placeholder="Name" oninput="updItem('${kind}',${i},'name',this.value)">
-        <input type="number" inputmode="numeric" value="${it.amount||''}" placeholder="0" oninput="updItem('${kind}',${i},'amount',this.value)">
-        ${withSpent?spentCell(it.id):''}
-        ${withCat?`<select class="cat" onchange="updItem('${kind}',${i},'cat',this.value)">
+      <div class="line${mods}${withSpent?overClass(planned, spent):''}" data-line="${kind}:${i}">
+        <input class="line-name" value="${esc(it.name||'')}" placeholder="Name" aria-label="Name" oninput="updItem('${kind}',${i},'name',this.value)">
+        ${moneyInput(it.amount, `updItem('${kind}',${i},'amount',this.value)`, { label: withSpent ? 'Planned amount' : 'Amount' })}
+        ${withSpent?spentCell(act, it.id, planned):''}
+        ${withCat?`<select class="inp cat" aria-label="Type" onchange="updItem('${kind}',${i},'cat',this.value)">
           <option value="needs" ${it.cat==='needs'?'selected':''}>Essential</option>
           <option value="wants" ${it.cat!=='needs'?'selected':''}>Discretionary</option>
-        </select>`:'<span></span>'}
-        <button class="del" onclick="delItem('${kind}',${i})" title="Remove">×</button>
+        </select>`:''}
+        <button class="line-del" onclick="delItem('${kind}',${i})" title="Remove" aria-label="Remove ${esc(it.name||'this line')}">${icon('x')}</button>
       </div>`;
     }).join('');
-    return head + (rows||`<div class="muted" style="font-size:12.5px;padding:4px 2px">Nothing yet.</div>`);
+    return rows ? head + rows : `<div class="muted" style="font-size:13px;padding:2px 0 4px">Nothing yet.</div>`;
   }
 
   /**
@@ -408,137 +693,104 @@ function renderPlan(){
     const v = act.unbudgetedByCat[cat]||0;
     if(!v) return '';
     return `<div class="li-unmatched">
+      ${icon('info', { size: 16 })}
       <span>Spent but not on a line above</span>
-      <span>${money(v)}</span>
-      <button class="btn ghost sm" onclick="setView('transactions')">Assign →</button>
+      <span class="amt">${money(v)}</span>
+      <button class="btn ghost sm" onclick="setView('transactions')">Assign${icon('arrow-right')}</button>
     </div>`;
   }
 
   const goalRows = state.goals.length ? state.goals.map(g=>{
     const v = m.contributions[g.id]||'';
     const suggested = g.monthly||0;
-    return `<div class="line-item goal-line">
-      <div style="font-size:13.5px;font-weight:600;display:flex;align-items:center;gap:8px"><span class="dot" style="background:var(--save)"></span>${esc(g.name)}</div>
-      <input type="number" inputmode="numeric" value="${v}" placeholder="0" oninput="updContribution('${g.id}',this.value)">
-      <button class="btn ghost sm" style="grid-column:span 1" onclick="updContribution('${g.id}',${suggested});render()" title="Suggested contribution">${suggested?money(suggested):'—'}</button>
-      <span></span>
+    return `<div class="line goal-line">
+      <div class="line-label"><span class="gi tone-${tintOf(g)}" style="width:30px;height:30px;border-radius:9px">${icon(goalIconName(g), { size: 16 })}</span><span>${esc(g.name)}</span></div>
+      ${moneyInput(v, `updContribution('${g.id}',this.value)`, { label: `Contribution to ${esc(g.name)}` })}
+      <button class="btn ghost sm" onclick="updContribution('${g.id}',${suggested});render()" title="Use the suggested contribution"><small>Suggested</small>${suggested?money(suggested):'—'}</button>
     </div>`;
-  }).join('') : `<div class="muted" style="font-size:12.5px">No goals yet. Create them on the Goals tab.</div>`;
+  }).join('') : `<div class="muted" style="font-size:13px">No goals yet. <button class="linkbtn" onclick="setView('goals')">Create one on the Goals tab</button>.</div>`;
 
   views.innerHTML = `
-  <div class="plan-grid">
-    <div>
-      <div class="group">
-        <div class="row-between"><h4>💵 Expected income</h4></div>
+  <div class="plan-sticky" id="planSticky">${planStickyInner(c)}</div>
+  <div class="plan">
+    <div class="plan-main">
+      <section class="card plan-summary" id="planSummary">${planSummaryInner(c)}</section>
+
+      ${group({ ic:'income', tone:'income', title:'Expected income', total:['income', totals.income], body:`
         <div class="field">
           <label>Primary income this month (net salary)</label>
-          <input class="inp" type="number" inputmode="numeric" value="${m.income||''}" placeholder="0" oninput="updIncome(this.value)">
+          ${moneyInput(m.income, 'updIncome(this.value)', { label: 'Primary income' })}
         </div>
-        <div class="row-between"><span class="total">Anticipated additional income</span><span class="total">${money(c.extra)}</span></div>
-        <div style="margin-top:8px">${itemRows(m.extraIncome,'extraIncome',false,false)}</div>
-        <button class="addrow" onclick="addItem('extraIncome')">+ Add extra income</button>
-      </div>
+        <div class="row-between" style="margin:4px 0 6px"><span class="field-label" style="margin:0">Anticipated additional income</span><span class="group-total" data-total="extra" style="font-size:13px;color:var(--muted)">${money(c.extra)}</span></div>
+        ${itemRows(m.extraIncome,'extraIncome',false,false)}
+        <button class="addrow" onclick="addItem('extraIncome')">${icon('plus')}Add extra income</button>` })}
 
-      <div class="group" style="border-color:rgba(52,211,153,.35)">
-        <div class="row-between"><h4>🏦 Accumulated savings (net worth)</h4><span class="total">available ${money(c.carryAvailable)}</span></div>
-        <div class="muted" style="font-size:12px;margin-bottom:12px">Money you've accumulated in previous months by spending less than you earn. You can use some of it as extra income this month; whatever you don't use keeps growing.</div>
+      ${group({ ic:'coins', tone:'savings', title:'Accumulated savings', total:null,
+        desc:`Money you've accumulated in previous months by spending less than you earn — <b style="color:var(--text)">${money(c.carryAvailable)}</b> available. You can use some of it as extra income this month; whatever you don't use keeps growing.`,
+        body:`
         ${c.carryAvailable>0 ? `
         <div class="field" style="margin-bottom:8px">
           <label>Use this month as additional income</label>
-          <input class="inp" type="number" inputmode="numeric" value="${m.usedCarryover||''}" placeholder="0" max="${c.carryAvailable}" oninput="updCarryover(this.value)">
+          ${moneyInput(m.usedCarryover, 'updCarryover(this.value)', { label: 'Savings used as income', attrs: ` max="${c.carryAvailable}"` })}
         </div>
-        <div style="display:flex;gap:8px">
-          <button class="btn ghost sm" style="flex:1" onclick="useCarryover(0)">None</button>
-          <button class="btn ghost sm" style="flex:1" onclick="useCarryover(${Math.round(c.carryAvailable/2)})">Half</button>
-          <button class="btn ghost sm" style="flex:1" onclick="useCarryover(${Math.round(c.carryAvailable)})">All</button>
+        <div class="pool-quick">
+          <button class="btn ghost sm" onclick="useCarryover(0)">None</button>
+          <button class="btn ghost sm" onclick="useCarryover(${Math.round(c.carryAvailable/2)})">Half</button>
+          <button class="btn ghost sm" onclick="useCarryover(${Math.round(c.carryAvailable)})">All</button>
         </div>
-        <div class="muted" style="font-size:12px;margin-top:10px" id="usedNote">Using <b style="color:var(--text)">${money(c.used)}</b> of your accumulated savings.</div>
-        ` : `<div class="muted" style="font-size:12.5px">You don't have accumulated savings yet. Finish a month with a surplus and it will appear here.</div>`}
-        <div class="muted" style="font-size:12px;margin-top:10px" id="surplusNote">This month's surplus (<b style="color:var(--text)">${money(Math.max(0,c.netToPool))}</b>) will automatically be added to your accumulated savings.</div>
-      </div>
+        <div class="pool-note" id="usedNote">${usedNote(c)}</div>
+        ` : `<div class="pool-note" style="margin-top:0">You don't have accumulated savings yet. Finish a month with a surplus and it will appear here.</div>`}
+        <div class="pool-note" id="surplusNote">${surplusNote(c)}</div>` })}
 
-      <div class="group">
-        <div class="row-between"><h4>🏠 Mandatory fixed bills</h4><span class="total">${money(c.billsTotal)}</span></div>
-        <div class="muted" style="font-size:12px;margin-bottom:10px">Rent, utilities, loans, insurance — essentials.</div>
+      ${group({ ic:'receipt', tone:'needs', title:'Mandatory fixed bills', total:['bills', totals.bills],
+        desc:'Rent, utilities, loans, insurance — essentials.', body:`
         ${itemRows(m.bills,'bills',false)}
         ${unmatchedRow('needs')}
-        <button class="addrow" onclick="addItem('bills')">+ Add bill</button>
-      </div>
+        <button class="addrow" onclick="addItem('bills')">${icon('plus')}Add bill</button>` })}
 
-      <div class="group">
-        <div class="row-between"><h4>🔁 Recurring expenses</h4></div>
-        <div class="muted" style="font-size:12px;margin-bottom:10px">Subscriptions, transport, food — mark whether each is essential or discretionary.</div>
+      ${group({ ic:'repeat', tone:'wants', title:'Recurring expenses', total:['recurring', totals.recurring],
+        desc:'Subscriptions, transport, food — mark whether each is essential or discretionary.', body:`
         ${itemRows(m.recurring,'recurring',true)}
         ${unmatchedRow('wants')}
-        <button class="addrow" onclick="addItem('recurring')">+ Add recurring</button>
-      </div>
+        <button class="addrow" onclick="addItem('recurring')">${icon('plus')}Add recurring</button>` })}
 
-      <div class="group">
-        <div class="row-between"><h4>📌 One-time expenses this month</h4></div>
-        <div class="muted" style="font-size:12px;margin-bottom:10px">One-off expenses expected for this month.</div>
+      ${group({ ic:'tag', tone:'needs', title:'One-time expenses this month', total:['oneTime', totals.oneTime],
+        desc:'One-off expenses expected for this month.', body:`
         ${itemRows(m.oneTime,'oneTime',true)}
-        <button class="addrow" onclick="addItem('oneTime')">+ Add one-time</button>
-      </div>
+        <button class="addrow" onclick="addItem('oneTime')">${icon('plus')}Add one-time</button>` })}
 
-      <div class="group">
-        <div class="row-between"><h4>◈ Savings to goals</h4><span class="total">${money(c.goalsTotal)}</span></div>
-        <div class="li-head"><span>Goal</span><span>Contribution</span><span>Suggested</span><span></span></div>
-        ${goalRows}
-      </div>
+      ${group({ ic:'target', tone:'savings', title:'Savings to goals', total:['goals', totals.goals], body: goalRows })}
 
-      <div class="group">
-        <div class="row-between"><h4>📈 Investing</h4></div>
+      ${group({ ic:'trending-up', tone:'invest', title:'Investing', total:['invest', totals.invest], body:`
         <div class="field" style="margin:0">
           <label>Amount to invest this month (fund, stocks, voluntary pension…)</label>
-          <input class="inp" type="number" inputmode="numeric" value="${m.invest||''}" placeholder="0" oninput="updInvest(this.value)">
-        </div>
-      </div>
+          ${moneyInput(m.invest, 'updInvest(this.value)', { label: 'Amount to invest' })}
+        </div>` })}
     </div>
 
-    <div class="advisor">
-      <div class="card">
-        <h3>Recommended budget</h3>
-        <div class="muted" style="font-size:12px;margin:2px 0 12px">50/30/20 strategy · pay yourself first</div>
-        <div class="kv"><span>Total income</span><b>${money(c.income)}</b></div>
-        ${recoLine("Essentials",a.needs,c.tNeeds,c.needs)}
-        ${recoLine("Discretionary",a.wants,c.tWants,c.wants)}
-        ${recoLine("Savings+Inv.",a.savings,c.tSavings,c.savings)}
-        <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)">
-          <div class="muted" style="font-size:12px">Unassigned available</div>
-          <div class="big-remain" style="color:${c.remaining<0?'var(--bad)':c.remaining>0?'var(--good)':'var(--text)'}">${money(c.remaining)}</div>
-          <div class="muted" style="font-size:12px">After essentials + savings you have <b style="color:var(--text)">${money(c.afterNeedsSavings)}</b> to spend freely.</div>
-        </div>
-        ${buildAdvice(c).slice(0,3).map(x=>`<div class="advice ${x.cls}"><span class="ai">${x.icon}</span><span>${x.t}</span></div>`).join('')}
+    <aside class="advisor">
+      <section class="card">${advisorHtml(c)}</section>
+      <div class="advisor-actions">
+        <button class="btn ghost sm" onclick="copyMonth()">${icon('copy')}Copy previous month</button>
+        <button class="btn ghost sm" onclick="clearMonth()">${icon('reset')}Clear month</button>
       </div>
-      <div style="display:flex;gap:8px;margin-top:12px">
-        <button class="btn ghost sm" style="flex:1" onclick="copyMonth()">copy previous month</button>
-        <button class="btn ghost sm" style="flex:1" onclick="clearMonth()">clear month</button>
-      </div>
-    </div>
-  </div>`;
-}
-
-function recoLine(name,pct,target,actual){
-  let cls;
-  if(name==='Savings+Inv.') cls = actual>=target?'good':'warn';
-  else cls = actual<=target*1.05?'good':'warn';
-  return `<div class="kv">
-    <span>${name} <span class="faint" style="font-size:11px">${pct}%</span></span>
-    <span style="text-align:right">
-      <b>${money(actual)}</b>
-      <span class="pill ${cls}" style="margin-left:6px;font-size:10.5px">target ${money(target)}</span>
-    </span>
+    </aside>
   </div>`;
 }
 
 /* ---- Goals ---- */
 function renderGoals(){
-  const list = state.goals.length ? `<div class="grid g2">${state.goals.map(goalCard).join('')}</div>`
-    : `<div class="empty"><div class="big">◈</div><p>You don't have any savings goals yet.<br>Create your first one to start building wealth.</p></div>`;
+  const list = state.goals.length ? `<div class="goals-grid">${state.goals.map(goalCard).join('')}</div>`
+    : `<div class="card empty">
+        <div class="empty-ic">${icon('target')}</div>
+        <h3>No savings goals yet</h3>
+        <p>Create your first one to start building wealth — an emergency fund is a good place to begin.</p>
+        <button class="btn" onclick="goalModal()">${icon('plus')}New goal</button>
+      </div>`;
   views.innerHTML = `
-    <div class="row-between" style="margin-bottom:16px">
-      <div class="muted" style="font-size:13.5px">Define objectives (emergency fund, trip, year-end bonus savings…) and let the advisor suggest how much to contribute each month.</div>
-      <button class="btn" onclick="goalModal()">+ New goal</button>
+    <div class="page-intro">
+      <p>Define objectives (emergency fund, trip, year-end bonus savings…) and let the advisor suggest how much to contribute each month.</p>
+      ${state.goals.length ? `<button class="btn" onclick="goalModal()">${icon('plus')}New goal</button>` : ''}
     </div>
     ${list}`;
 }
@@ -546,23 +798,29 @@ function goalCard(g){
   const pct = g.target>0?Math.min(100,g.saved/g.target*100):0;
   const remain = Math.max(0,g.target-g.saved);
   const monthsLeft = g.monthly>0?Math.ceil(remain/g.monthly):null;
-  return `<div class="goal-card">
-    <div class="row-between">
-      <span class="goal-name">${esc(g.name)}</span>
-      <span class="pill ${pct>=100?'good':'warn'}">${pct.toFixed(0)}%</span>
+  const tint = tintOf(g);
+  return `<section class="card goal-card">
+    <div class="goal-top">
+      <span class="gi lg tone-${tint}">${icon(goalIconName(g))}</span>
+      <div class="goal-title">
+        <div class="goal-name">${esc(g.name)}</div>
+        <div class="goal-sub">${g.deadline?`${icon('calendar')}Target date: ${esc(g.deadline)}`:'No target date'}</div>
+      </div>
+      ${pill(`${pct>=100?icon('check'):''}${pct.toFixed(0)}%`, pct>=100?'good':'neutral')}
     </div>
-    ${g.deadline?`<div class="muted" style="font-size:12px">Target date: ${esc(g.deadline)}</div>`:''}
-    <div class="prog"><i style="width:${pct}%"></i></div>
-    <div class="goal-meta"><span><b style="color:var(--text)">${money(g.saved)}</b> saved</span><span>target ${money(g.target)}</span></div>
-    <div class="muted" style="font-size:12.5px;margin-top:10px">
-      ${g.monthly>0?`Suggested monthly contribution: <b style="color:var(--text)">${money(g.monthly)}</b>${monthsLeft!==null?` · ~${monthsLeft} months left`:''}`:'No monthly contribution set'}
+    <div>
+      <div class="goal-amounts"><b>${money(g.saved)}</b><span>saved of ${money(g.target)}</span></div>
+      <div class="meter lg" style="margin-top:10px"><i class="tone-${tint}" style="width:${pct}%"></i></div>
     </div>
-    <div style="display:flex;gap:8px;margin-top:14px">
-      <button class="btn ghost sm" onclick="addToGoal('${g.id}')">+ Log savings</button>
-      <button class="btn ghost sm" onclick="goalModal('${g.id}')">Edit</button>
-      <button class="btn ghost sm" style="color:var(--bad)" onclick="delGoal('${g.id}')">Delete</button>
+    <div class="goal-meta">
+      ${g.monthly>0?`Suggested monthly contribution: <b>${money(g.monthly)}</b>${monthsLeft!==null?` · ~${monthsLeft} month${monthsLeft===1?'':'s'} left`:''}`:'No monthly contribution set'}
     </div>
-  </div>`;
+    <div class="goal-actions">
+      <button class="btn soft sm" onclick="addToGoal('${g.id}')">${icon('plus')}Log savings</button>
+      <button class="btn ghost sm" onclick="goalModal('${g.id}')">${icon('pencil')}Edit</button>
+      <button class="iconbtn sm danger" onclick="delGoal('${g.id}')" title="Delete goal" aria-label="Delete ${esc(g.name)}">${icon('trash')}</button>
+    </div>
+  </section>`;
 }
 
 /* ---- Annual Review ---- */
@@ -602,139 +860,141 @@ function renderAnnual(){
   const netWorthNow = (yearKeys.length?chain[Object.keys(chain).sort().pop()].closing:0) + goalsSavedTotal();
   const avgSR = tot.srCount? tot.srSum/tot.srCount : 0;
 
-  // table
+  const LABELS = ['Earned','Essentials','Discretionary','Saved / inv.','To net worth','Pool balance'];
+  const cells = (vals) => vals.map((v,i)=>`<td data-label="${LABELS[i]}"${v.cls?` class="${v.cls}"`:''}>${v.t ?? v}</td>`).join('');
+
   const body = rows.map(r=>{
     if(!r.exists){
-      return `<tr class="empty-row"><td>${MONTHS_ABBR[r.mo-1]}</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>`;
+      return `<tr class="empty-row"><td>${MONTHS[r.mo-1]}</td>${cells(['—','—','—','—','—','—'])}</tr>`;
     }
     const c=r.c;
-    const netCls = c.netToPool>=0?'pos':'neg';
-    const sr = c.income>0?c.pSavings.toFixed(0)+'%':'—';
-    return `<tr style="cursor:pointer" onclick="gotoMonth('${r.key}')">
-      <td>${MONTHS_ABBR[r.mo-1]}</td>
-      <td>${money(c.earned)}</td>
-      <td>${money(c.needs)}</td>
-      <td>${money(c.wants)}</td>
-      <td>${money(c.savings)}</td>
-      <td class="${netCls}">${c.netToPool>=0?'+':''}${money(c.netToPool)}</td>
-      <td>${money(c.closing)}</td>
+    return `<tr class="link" tabindex="0" onclick="gotoMonth('${r.key}')" onkeydown="if(event.key==='Enter')this.click()">
+      <td>${MONTHS[r.mo-1]}</td>
+      ${cells([money(c.earned), money(c.needs), money(c.wants), money(c.savings),
+        { t: `${c.netToPool>=0?'+':''}${money(c.netToPool)}`, cls: c.netToPool>=0?'pos':'neg' }, money(c.closing)])}
     </tr>`;
   }).join('');
 
   const totalRow = `<tr class="total-row">
-    <td>YTD total</td>
-    <td>${money(tot.earned)}</td>
-    <td>${money(tot.needs)}</td>
-    <td>${money(tot.wants)}</td>
-    <td>${money(tot.savings)}</td>
-    <td class="${tot.net>=0?'pos':'neg'}">${tot.net>=0?'+':''}${money(tot.net)}</td>
-    <td>${money(poolEndOfYear)}</td>
+    <td>Year to date</td>
+    ${cells([money(tot.earned), money(tot.needs), money(tot.wants), money(tot.savings),
+      { t: `${tot.net>=0?'+':''}${money(tot.net)}`, cls: tot.net>=0?'pos':'neg' }, money(poolEndOfYear)])}
   </tr>`;
-
-  // sparkline of monthly net contribution
-  const maxAbs = Math.max(1, ...netSeries.map(s=>Math.abs(s.v)));
-  const spark = netSeries.map(s=>{
-    const hgt = Math.max(2, Math.abs(s.v)/maxAbs*54);
-    const col = !s.active? 'var(--surface2)' : s.v>=0?'var(--save)':'var(--bad)';
-    return `<div class="bar" title="${MONTHS_ABBR[s.mo-1]}: ${money(s.v)}"><i style="height:${hgt}px;background:${col}"></i></div>`;
-  }).join('');
-  const sparkLabels = netSeries.map(s=>`<div class="bl">${MONTHS_ABBR[s.mo-1][0]}</div>`).join('');
 
   const hasData = tot.monthsPlanned>0;
 
   views.innerHTML = `
-    <div class="row-between" style="margin-bottom:18px">
+    <div class="year-bar">
       <div class="yearnav">
-        <button class="iconbtn" onclick="stepYear(-1)" title="Previous year">‹</button>
-        <span style="font-size:18px;font-weight:750;min-width:64px;text-align:center">${year}</span>
-        <button class="iconbtn" onclick="stepYear(1)" title="Next year">›</button>
+        <button class="iconbtn" onclick="stepYear(-1)" title="Previous year" aria-label="Previous year">${icon('chevron-left')}</button>
+        <b>${year}</b>
+        <button class="iconbtn" onclick="stepYear(1)" title="Next year" aria-label="Next year">${icon('chevron-right')}</button>
       </div>
-      <div class="muted" style="font-size:13px">${tot.monthsPlanned} of 12 months planned</div>
+      <div class="year-count">${tot.monthsPlanned} of 12 months planned</div>
     </div>
 
-    ${!hasData ? `<div class="empty"><div class="big">▤</div><p>No months planned for ${year} yet.<br>Plan a month and it will show up in this review.</p></div>` : `
+    ${!hasData ? `<div class="card empty">
+      <div class="empty-ic">${icon('chart')}</div>
+      <h3>No months planned for ${year} yet</h3>
+      <p>Plan a month and it will show up in this review.</p>
+      <button class="btn" onclick="setView('plan')">${icon('budget')}Go to the budget</button>
+    </div>` : `
 
-    <div class="grid g4" style="margin-bottom:4px">
-      ${statCard("Total earned (YTD)", money(tot.earned), `${tot.monthsPlanned} month${tot.monthsPlanned>1?'s':''} planned`)}
-      ${statCard("Total saved + invested", money(tot.savings), "into goals & investments")}
-      ${statCard("Added to net worth", money(tot.net), tot.net>=0?"surplus kept":"net deficit", tot.net>=0?'good':'bad')}
-      ${statCard("Avg. savings rate", avgSR.toFixed(0)+"%", avgSR>=state.settings.alloc.savings?"at/above target":"below target", avgSR>=state.settings.alloc.savings?'good':'warn')}
+    <div class="kpis" style="margin-top:0">
+      ${tile({ ic:'income', tone:'income', label:'Total earned (YTD)', value: money(tot.earned), foot: `${tot.monthsPlanned} month${tot.monthsPlanned>1?'s':''} planned` })}
+      ${tile({ ic:'piggy', tone:'savings', label:'Saved + invested', value: money(tot.savings), foot: 'into goals & investments' })}
+      ${tile({ ic:'trending-up', tone:'invest', label:'Added to net worth', value: money(tot.net), foot: pill(tot.net>=0?'surplus kept':'net deficit', tot.net>=0?'good':'bad') })}
+      ${tile({ ic:'percent', tone:'wants', label:'Avg. savings rate', value: avgSR.toFixed(0)+'%', foot: pill(avgSR>=state.settings.alloc.savings?'at/above target':'below target', avgSR>=state.settings.alloc.savings?'good':'warn') })}
     </div>
 
-    <div class="grid g2" style="margin-top:16px">
-      <div class="card" style="background:linear-gradient(165deg,rgba(52,211,153,.10),var(--surface))">
-        <h3>Net worth to date</h3>
-        <div class="stat" style="margin-top:8px;color:var(--save)">${money(netWorthNow)}</div>
-        <div class="muted" style="font-size:12px;margin-top:2px">Accumulated savings + goal balances, across all months</div>
-        <div style="margin-top:14px">
-          <div class="kv"><span>Available savings pool (end of ${year})</span><b>${money(poolEndOfYear)}</b></div>
-          <div class="kv"><span>Saved in goals</span><b>${money(goalsSavedTotal())}</b></div>
-          <div class="kv"><span>Best month</span><b>${bestNet?MONTHS_ABBR[bestNet.mo-1]+' · '+money(bestNet.v):'—'}</b></div>
-          <div class="kv"><span>Weakest month</span><b>${worstNet?MONTHS_ABBR[worstNet.mo-1]+' · '+money(worstNet.v):'—'}</b></div>
-        </div>
-      </div>
-      <div class="card">
-        <h3>Monthly contribution to net worth</h3>
-        <div class="spark">${spark}</div>
-        <div style="display:flex;gap:5px">${sparkLabels.replace(/class="bl"/g,'class="bl" style="flex:1"')}</div>
-        <div class="muted" style="font-size:12px;margin-top:10px">Green bars are months you finished with a surplus; red bars are months you spent more than you earned.</div>
-      </div>
+    <div class="dash-row r-8-4">
+      <section class="card">
+        <div class="card-head"><div><h3>Monthly contribution to net worth</h3>
+          <div class="card-sub">Above the line, a month you finished with a surplus; below it, one where you spent more than you earned.</div></div></div>
+        ${chartSlot('bars', { labels: MONTHS_ABBR, values: netSeries.map(s=>s.v), active: netSeries.map(s=>s.active), year }, {
+          height: 220, label: `Monthly contribution to net worth in ${year}. The figures are in the table below.` })}
+      </section>
+      <section class="card">
+        <div class="card-head"><div><h3>Net worth to date</h3><div class="card-sub">Accumulated savings + goal balances, across all months</div></div></div>
+        <div class="nw-big">${money(netWorthNow)}</div>
+        <div class="kv"><span>Savings pool, end of ${year}</span><b>${money(poolEndOfYear)}</b></div>
+        <div class="kv"><span>Saved in goals</span><b>${money(goalsSavedTotal())}</b></div>
+        <div class="kv"><span>Best month</span><b>${bestNet?MONTHS_ABBR[bestNet.mo-1]+' · '+money(bestNet.v):'—'}</b></div>
+        <div class="kv"><span>Weakest month</span><b>${worstNet?MONTHS_ABBR[worstNet.mo-1]+' · '+money(worstNet.v):'—'}</b></div>
+      </section>
     </div>
 
-    <div class="card" style="margin-top:16px">
-      <h3>Month-by-month breakdown</h3>
+    <section class="card mt">
+      <div class="card-head"><div><h3>Month by month</h3><div class="card-sub">Select a planned month to open its budget. "Earned" leaves out savings pulled from earlier months, so it reflects real income.</div></div></div>
       <div style="overflow-x:auto">
       <table class="ytbl">
         <thead><tr>
-          <th>Month</th><th>Earned</th><th>Essentials</th><th>Discretionary</th><th>Saved/Inv.</th><th>To net worth</th><th>Pool balance</th>
+          <th>Month</th><th>Earned</th><th>Essentials</th><th>Discretionary</th><th>Saved / inv.</th><th>To net worth</th><th>Pool balance</th>
         </tr></thead>
         <tbody>${body}${totalRow}</tbody>
       </table>
       </div>
-      <div class="muted" style="font-size:12px;margin-top:10px">Click any planned month to jump to its plan. "Earned" excludes savings pulled from prior months, so it reflects real income.</div>
-    </div>
+    </section>
     `}
   `;
+  drawCharts(views);
 }
 
 /* ---- Settings ---- */
 function renderSettings(){
   const a = state.settings.alloc;
   const sum = a.needs+a.wants+a.savings;
+  const theme = getTheme();
+  const opt = (k, ic, label) => `<button type="button" class="${theme===k?'on':''}" aria-pressed="${theme===k}" onclick="setTheme('${k}')">${icon(ic)}${label}</button>`;
+  const saved = document.getElementById('lastSaved');
   views.innerHTML = `
-  <div class="grid g2">
-    <div class="card">
-      <h3>Allocation strategy</h3>
-      <p class="muted" style="font-size:13px;margin:8px 0 16px">Adjust the target percentages. The base model is 50/30/20: essentials, discretionary, savings.</p>
-      ${allocSlider('needs','Essentials (needs)',a.needs,'var(--need)')}
-      ${allocSlider('wants','Discretionary (wants)',a.wants,'var(--want)')}
-      ${allocSlider('savings','Savings + investing',a.savings,'var(--save)')}
-      <div class="kv" style="margin-top:8px"><span>Total</span><b id="allocSum" style="color:${sum===100?'var(--good)':'var(--warn)'}">${sum}%</b></div>
-      <div id="allocHint" class="muted" style="font-size:12px;margin-top:4px">${sum===100?'Balanced to 100%.':'The ideal total is 100%. Adjust so it adds up.'}</div>
-      <div style="display:flex;gap:8px;margin-top:14px">
-        <button class="btn ghost sm" onclick="setAlloc(50,30,20)">50 / 30 / 20</button>
-        <button class="btn ghost sm" onclick="setAlloc(60,20,20)">60 / 20 / 20</button>
-        <button class="btn ghost sm" onclick="setAlloc(50,20,30)">Aggressive saving</button>
-      </div>
+  <div class="settings">
+    <div class="stack">
+      <section class="card">
+        <div class="card-head"><div><h3>Appearance</h3><div class="card-sub">Light, dark, or whatever this device is set to</div></div></div>
+        <div class="set-row">
+          <div class="set-text"><b>Theme</b><span>Remembered on this device</span></div>
+          <div class="seg" role="group" aria-label="Theme">${opt('system','monitor','Auto')}${opt('light','sun','Light')}${opt('dark','moon','Dark')}</div>
+        </div>
+      </section>
+      <section class="card">
+        <div class="card-head"><div><h3>Allocation strategy</h3><div class="card-sub">Adjust the target percentages. The base model is 50/30/20: essentials, discretionary, savings.</div></div></div>
+        ${allocSlider('needs','Essentials (needs)',a.needs)}
+        ${allocSlider('wants','Discretionary (wants)',a.wants)}
+        ${allocSlider('savings','Savings + investing',a.savings)}
+        <div class="kv"><span>Total</span><b id="allocSum" style="color:${sum===100?'var(--pos)':'var(--warn)'}">${sum}%</b></div>
+        <div id="allocHint" class="card-sub">${sum===100?'Balanced to 100%.':'The ideal total is 100%. Adjust so it adds up.'}</div>
+        <div class="preset-row">
+          <button class="btn ghost sm" onclick="setAlloc(50,30,20)">50 / 30 / 20</button>
+          <button class="btn ghost sm" onclick="setAlloc(60,20,20)">60 / 20 / 20</button>
+          <button class="btn ghost sm" onclick="setAlloc(50,20,30)">Aggressive saving</button>
+        </div>
+      </section>
     </div>
-    <div class="card">
-      <h3>Data</h3>
-      <p class="muted" style="font-size:13px;margin:8px 0 14px">Your information is stored only in this browser. Export a backup whenever you like.</p>
-      <div style="display:flex;flex-direction:column;gap:10px">
-        <button class="btn ghost" onclick="exportData()">⬇ Export backup (JSON)</button>
-        <label class="btn ghost" style="text-align:center">⬆ Import backup<input type="file" accept="application/json" style="display:none" onchange="importData(this)"></label>
-        <button class="btn ghost" style="color:var(--bad)" onclick="resetAll()">Erase all data</button>
-      </div>
-      <div class="muted" style="font-size:12px;margin-top:16px">
-        Principles applied: pay yourself first, percentage-based budgeting, emergency fund as the first goal, and living below your means.
-      </div>
+    <div class="stack">
+      <section class="card">
+        <div class="card-head"><div><h3>Data</h3><div class="card-sub">Saved to your account and synced to every device you sign in on. Export a backup whenever you like.</div></div></div>
+        <div class="data-actions">
+          <button class="btn ghost" onclick="exportData()">${icon('download')}Export backup (JSON)</button>
+          <label class="btn ghost">${icon('upload')}Import backup<input type="file" accept="application/json" hidden onchange="importData(this)"></label>
+          <button class="btn ghost danger" style="margin-right:0" onclick="resetAll()">${icon('trash')}Erase all data</button>
+        </div>
+        <div class="card-note">Principles applied: pay yourself first, percentage-based budgeting, emergency fund as the first goal, and living below your means.</div>
+      </section>
+      ${user.email ? `<section class="card only-phone">
+        <div class="card-head"><div><h3>Account</h3><div class="card-sub">${esc(user.email)}</div></div></div>
+        ${saved?.textContent ? `<div class="save-state" data-state="${esc(saved.dataset.state || 'saved')}" style="margin-bottom:14px">${esc(saved.textContent)}</div>` : ''}
+        <button class="btn ghost block" onclick="doSignOut()">${icon('logout')}Sign out</button>
+      </section>` : ''}
     </div>
   </div>`;
 }
-function allocSlider(k,label,val,col){
-  return `<div style="margin-bottom:14px">
-    <div class="row-between" style="margin-bottom:4px"><label style="font-size:13px;color:var(--text)">${label}</label><b id="allocval_${k}">${val}%</b></div>
-    <input type="range" min="0" max="100" value="${val}" style="width:100%;accent-color:${col}" oninput="liveAlloc('${k}',this.value)">
+function allocSlider(k,label,val){
+  const col = { needs:'var(--cat-needs)', wants:'var(--cat-wants)', savings:'var(--cat-savings)' }[k];
+  return `<div class="slider">
+    <div class="slider-top"><span><span class="swatch tone-${k}"></span>${label}</span><b id="allocval_${k}">${val}%</b></div>
+    <input type="range" min="0" max="100" value="${val}" style="--fill:${col};--pct:${val}%" aria-label="${label}"
+      oninput="this.style.setProperty('--pct',this.value+'%');liveAlloc('${k}',this.value)">
   </div>`;
 }
 export function liveAlloc(k,v){
@@ -743,9 +1003,57 @@ export function liveAlloc(k,v){
   const lab=document.getElementById('allocval_'+k); if(lab) lab.textContent=v+'%';
   const a=state.settings.alloc, sum=a.needs+a.wants+a.savings;
   const se=document.getElementById('allocSum');
-  if(se){ se.textContent=sum+'%'; se.style.color = sum===100?'var(--good)':'var(--warn)'; }
+  if(se){ se.textContent=sum+'%'; se.style.color = sum===100?'var(--pos)':'var(--warn)'; }
   const hint=document.getElementById('allocHint');
   if(hint) hint.textContent = sum===100?'Balanced to 100%.':'The ideal total is 100%. Adjust so it adds up.';
+}
+
+/* ---- Theme ---- */
+const THEME_KEY = 'pfa.theme';
+const THEME_BG = { light: '#f4f5f9', dark: '#0b0e14' };
+
+export function getTheme(){
+  try { return localStorage.getItem(THEME_KEY) || 'system'; } catch { return 'system'; }
+}
+
+/**
+ * The picked theme wins over the device's, both ways. Kept per device — a
+ * phone in dark mode and a laptop in light are both reasonable at once.
+ */
+export function setTheme(mode){
+  try {
+    if (mode === 'light' || mode === 'dark') localStorage.setItem(THEME_KEY, mode);
+    else localStorage.removeItem(THEME_KEY);
+  } catch { /* private window: it still applies for this visit */ }
+  const root = document.documentElement;
+  if (mode === 'light' || mode === 'dark') root.dataset.theme = mode;
+  else delete root.dataset.theme;
+  document.querySelectorAll('meta[name="theme-color"]').forEach((m) => {
+    const own = (m.getAttribute('media') || '').includes('dark') ? THEME_BG.dark : THEME_BG.light;
+    m.setAttribute('content', THEME_BG[mode] || own);
+  });
+  if (activeView === 'settings') render();
+}
+
+/* ---- The phone's "more" sheet: what does not fit in the tab bar ---- */
+export function openMore(){
+  const saved = document.getElementById('lastSaved');
+  openModal(`
+    <div class="more-head">
+      <span class="avatar lg">${avatarInner()}</span>
+      <div class="me-text">
+        <span class="me-name">${esc(displayName() || 'Your finances')}</span>
+        ${user.email ? `<span class="muted" style="font-size:13px">${esc(user.email)}</span>` : ''}
+        ${saved?.textContent ? `<span class="save-state" data-state="${esc(saved.dataset.state || 'saved')}">${esc(saved.textContent)}</span>` : ''}
+      </div>
+    </div>
+    <div class="more-list">
+      <button type="button" onclick="closeModal();setView('goals')"><span class="gi tone-savings">${icon('target')}</span>Goals</button>
+      <button type="button" onclick="closeModal();setView('annual')"><span class="gi tone-invest">${icon('chart')}</span>Year in review</button>
+      <button type="button" onclick="closeModal();setView('settings')"><span class="gi tone-wants">${icon('settings')}</span>Settings</button>
+    </div>
+    ${user.email ? `<button class="btn ghost block" type="button" onclick="doSignOut()">${icon('logout')}Sign out</button>` : ''}
+  `);
 }
 
 /* ---------------- Mutations ---------------- */
@@ -759,7 +1067,12 @@ export function updCarryover(v){
 export function useCarryover(v){ getMonth(currentMonth).usedCarryover = Math.max(0,+v||0); save(); render(); }
 export function updItem(kind,i,field,v){
   const arr = getMonth(currentMonth)[kind];
-  if(arr[i]) { arr[i][field] = field==='amount'? (+v||0) : v; save(); softRefreshAdvisor(); }
+  if(arr[i]) {
+    arr[i][field] = field==='amount'? (+v||0) : v;
+    save();
+    if(field==='amount') refreshLine(kind,i);
+    softRefreshAdvisor();
+  }
 }
 export function addItem(kind){
   const arr = getMonth(currentMonth)[kind];
@@ -770,31 +1083,36 @@ export function addItem(kind){
 export function delItem(kind,i){ getMonth(currentMonth)[kind].splice(i,1); save(); render(); }
 export function updContribution(gid,v){ getMonth(currentMonth).contributions[gid] = +v||0; save(); softRefreshAdvisor(); }
 
-/* refresh advisor panel without losing input focus */
+/** A planned amount changed: its line's spent meter measures against it. */
+function refreshLine(kind,i){
+  const el = document.querySelector(`[data-line="${kind}:${i}"]`);
+  if(!el || !el.classList.contains('has-spent')) return;
+  const it = getMonth(currentMonth)[kind][i];
+  const act = actualsFor(currentMonth, render);
+  const planned = +it.amount||0;
+  el.classList.remove('li-over','li-close');
+  const oc = overClass(planned, act.byLine[it.id]||0).trim();
+  if(oc) el.classList.add(oc);
+  const cell = el.querySelector('.line-spent');
+  if(cell) cell.outerHTML = spentCell(act, it.id, planned);
+}
+
+/* refresh the plan's figures without losing input focus */
 function softRefreshAdvisor(){
   if(activeView!=='plan'){ render(); return; }
-  const adv = document.querySelector('.advisor');
-  if(adv){
-    const c = compute(currentMonth); const a=state.settings.alloc;
-    adv.querySelector('.card').innerHTML = `
-        <h3>Recommended budget</h3>
-        <div class="muted" style="font-size:12px;margin:2px 0 12px">50/30/20 strategy · pay yourself first</div>
-        <div class="kv"><span>Total income</span><b>${money(c.income)}</b></div>
-        ${recoLine("Essentials",a.needs,c.tNeeds,c.needs)}
-        ${recoLine("Discretionary",a.wants,c.tWants,c.wants)}
-        ${recoLine("Savings+Inv.",a.savings,c.tSavings,c.savings)}
-        <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)">
-          <div class="muted" style="font-size:12px">Unassigned available</div>
-          <div class="big-remain" style="color:${c.remaining<0?'var(--bad)':c.remaining>0?'var(--good)':'var(--text)'}">${money(c.remaining)}</div>
-          <div class="muted" style="font-size:12px">After essentials + savings you have <b style="color:var(--text)">${money(c.afterNeedsSavings)}</b> to spend freely.</div>
-        </div>
-        ${buildAdvice(c).slice(0,3).map(x=>`<div class="advice ${x.cls}"><span class="ai">${x.icon}</span><span>${x.t}</span></div>`).join('')}`;
-  }
   const c = compute(currentMonth);
+  const adv = document.querySelector('.advisor .card');
+  if(adv) adv.innerHTML = advisorHtml(c);
+  const sum = document.getElementById('planSummary');
+  if(sum) sum.innerHTML = planSummaryInner(c);
+  const sticky = document.getElementById('planSticky');
+  if(sticky) sticky.innerHTML = planStickyInner(c);
   const un = document.getElementById('usedNote');
-  if(un) un.innerHTML = `Using <b style="color:var(--text)">${money(c.used)}</b> of your accumulated savings.`;
+  if(un) un.innerHTML = usedNote(c);
   const sn = document.getElementById('surplusNote');
-  if(sn) sn.innerHTML = `This month's surplus (<b style="color:var(--text)">${money(Math.max(0,c.netToPool))}</b>) will automatically be added to your accumulated savings.`;
+  if(sn) sn.innerHTML = surplusNote(c);
+  const totals = groupTotals(getMonth(currentMonth), c);
+  document.querySelectorAll('[data-total]').forEach((el) => { el.textContent = money(totals[el.dataset.total] ?? 0); });
 }
 
 export function copyMonth(){
@@ -823,12 +1141,18 @@ export function goalModal(id){
   const g = id? state.goals.find(x=>x.id===id) : {name:'',target:'',saved:0,monthly:'',deadline:''};
   openModal(`
     <h3>${id?'Edit goal':'New savings goal'}</h3>
-    <div class="field"><label>Name</label><input class="inp" id="g_name" value="${esc(g.name)}" placeholder="e.g. Emergency fund"></div>
-    <div class="field"><label>Target amount</label><input class="inp" id="g_target" type="number" value="${g.target||''}" placeholder="0"></div>
-    <div class="field"><label>Already saved</label><input class="inp" id="g_saved" type="number" value="${g.saved||''}" placeholder="0"></div>
-    <div class="field"><label>Suggested monthly contribution (optional)</label><input class="inp" id="g_monthly" type="number" value="${g.monthly||''}" placeholder="0"></div>
-    <div class="field"><label>Target date (optional)</label><input class="inp" id="g_deadline" value="${esc(g.deadline||'')}" placeholder="e.g. Dec 2026"></div>
+    <p class="sheet-sub">${id ? 'Change the target, what is saved so far, or the monthly suggestion.' : 'What are you saving for? The advisor suggests how much to set aside each month.'}</p>
+    <div class="field"><label for="g_name">Name</label><input class="inp" id="g_name" value="${esc(g.name)}" placeholder="e.g. Emergency fund"></div>
+    <div class="tx-2col">
+      <div class="field"><label for="g_target">Target amount</label><input class="inp" id="g_target" type="number" inputmode="numeric" value="${g.target||''}" placeholder="0"></div>
+      <div class="field"><label for="g_saved">Already saved</label><input class="inp" id="g_saved" type="number" inputmode="numeric" value="${g.saved||''}" placeholder="0"></div>
+    </div>
+    <div class="tx-2col">
+      <div class="field"><label for="g_monthly">Monthly contribution</label><input class="inp" id="g_monthly" type="number" inputmode="numeric" value="${g.monthly||''}" placeholder="Optional"></div>
+      <div class="field"><label for="g_deadline">Target date</label><input class="inp" id="g_deadline" value="${esc(g.deadline||'')}" placeholder="e.g. Dec 2026"></div>
+    </div>
     <div class="actions">
+      <span></span>
       <button class="btn ghost" onclick="closeModal()">Cancel</button>
       <button class="btn" onclick="saveGoal('${id||''}')">Save</button>
     </div>
@@ -855,10 +1179,14 @@ export function delGoal(id){
 export function addToGoal(id){
   const g = state.goals.find(x=>x.id===id);
   openModal(`
-    <h3>Log savings — ${esc(g.name)}</h3>
-    <div class="field"><label>Amount to add</label><input class="inp" id="add_amt" type="number" placeholder="0" autofocus></div>
-    <div class="muted" style="font-size:12.5px">Current: ${money(g.saved)} of ${money(g.target)}</div>
+    <h3>Log savings</h3>
+    <p class="sheet-sub"><span class="gi tone-${tintOf(g)}" style="width:22px;height:22px;border-radius:7px">${icon(goalIconName(g), { size: 13 })}</span><span>${esc(g.name)} · ${money(g.saved)} of ${money(g.target)} so far</span></p>
+    <div class="amount-field">
+      <span class="amount-cur" style="display:grid;place-items:center;padding:0 12px;background:var(--surface)">₡</span>
+      <input class="amount-inp" id="add_amt" type="number" inputmode="numeric" placeholder="0" aria-label="Amount to add">
+    </div>
     <div class="actions">
+      <span></span>
       <button class="btn ghost" onclick="closeModal()">Cancel</button>
       <button class="btn" onclick="confirmAddGoal('${id}')">Add</button>
     </div>`);
@@ -891,12 +1219,21 @@ export function resetAll(){
   render(); toast("Data erased");
 }
 
-/* Modal + toast */
-export function openModal(html){ document.getElementById('modalBox').innerHTML=html; document.getElementById('modalBg').classList.add('show'); }
-export function closeModal(){ document.getElementById('modalBg').classList.remove('show'); }
+/* Sheets + toast */
+export function openModal(html){
+  const box = document.getElementById('modalBox');
+  box.innerHTML = `<button class="iconbtn sm plain sheet-close" type="button" onclick="closeModal()" aria-label="Close">${icon('x')}</button>${html}`;
+  box.scrollTop = 0;
+  document.getElementById('modalBg').classList.add('show');
+  document.body.classList.add('sheet-open');
+}
+export function closeModal(){
+  document.getElementById('modalBg').classList.remove('show');
+  document.body.classList.remove('sheet-open');
+}
 document.getElementById('modalBg').addEventListener('click',e=>{ if(e.target.id==='modalBg') closeModal(); });
 let toastT;
-export function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('show'),2200); }
+export function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('show'),2400); }
 
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
 

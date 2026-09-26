@@ -16,12 +16,23 @@ npm test                       # persistence unit tests
 Without credentials the app renders a "Not configured" card rather than
 failing silently.
 
+To work on the screens without touching real data, open
+`http://localhost:5173/?demo`. It skips sign-in and loads a month of sample
+accounts, charges, plans and goals (`src/demo.js`) into the in-memory
+repository, dated relative to today. Only the dev server honours it — a build
+does not contain the module at all. Add `&view=accounts` (or any view) to open
+straight on one; the home-screen shortcuts in the manifest use the same
+parameter.
+
 ## Layout
 
 | File | Holds |
 | --- | --- |
-| `index.html` | Shell: sign-in gate, header, nav, `#views` mount, modal, toast |
-| `src/styles.css` | Everything from the original `<style>` block |
+| `index.html` | Shell: sign-in gate, sidebar, top bar, phone tab bar, `#views` mount, sheet, toast |
+| `src/styles.css` | The design system: light and dark tokens, the shell, components, each view |
+| `src/icons.js` | Inline SVG icons, and the pictures for accounts, cards, merchants and goals |
+| `src/charts.js` | The spending-pace line, the year's bars and the category ring |
+| `src/demo.js` | Sample data for `/?demo` on the dev server |
 | `src/state.js` | State shape, dirty-tracking, batched persistence |
 | `src/repo.js` | The storage contract, and the test injection seam |
 | `src/supabase-repo.js` | Real implementation |
@@ -66,7 +77,7 @@ deliberate action, not typing.
 Two figures that look alike and are not:
 
 - **Uncategorized** — no category at all. The review queue clears these, and it
-  is what the fourth stat card shows.
+  is the Uncategorized figure in the Activity summary.
 - **Unbudgeted** — categorized, but not attached to a plan line. Until budget
   lines are assignable in the UI, nearly everything is unbudgeted, so showing
   it now would be noise. `spendTotals()` computes both.
@@ -96,11 +107,45 @@ Known simplification: statement cycles do not align with calendar months —
 Davivienda cuts on the 15th — so a month's rate is close to, not identical to,
 what any single statement charged.
 
+## Design
+
+One stylesheet, organised as tokens, shell, components, then views. Colours
+are custom properties with a light and a dark set; the theme follows the
+device unless one is picked in Settings, which is remembered per device in
+`localStorage` and applied by an inline script in `index.html` before the
+first paint, so a dark choice never flashes light.
+
+The category colours (essentials, discretionary, savings, investing) were
+validated as a set for colour-blind separation in both themes. Charts carry
+a legend or the figures beside them, so no value is readable by colour alone,
+and each has the same readout on keyboard focus as on hover.
+
+Icons are inline SVG strings from `icons.js`, so they inherit `currentColor`
+and need nothing extra cached. The same module draws an account's picture:
+a card in its bank's colours with its network's mark, a bank monogram for
+savings, a type icon for cash and investments. The banks are monograms, not
+logos — enough to find a card at a glance, and nothing to go stale.
+
+The font is Inter, bundled from `@fontsource-variable/inter` rather than
+loaded from a CDN, so it lands in `/assets/` and the service worker caches it
+like any other asset.
+
 ## Mobile
 
-Under 760px the sidebar becomes a bottom tab bar and everything goes single
-column. Six full nav labels collide at 390px, so each button carries a
-`data-short` attribute that CSS swaps in. Tested at 390px.
+Below 880px the app is laid out as a phone app rather than a narrow desktop:
+
+- The sidebar is replaced by a tab bar — Home, Budget, Activity, Accounts —
+  with Add expense in the middle. Goals, Year in review and Settings sit
+  behind the avatar at the top right.
+- Every dialog is a bottom sheet with its action row pinned, so Save is never
+  below the fold.
+- Inputs are 16px, the size under which iOS zooms the page on focus.
+- `viewport-fit=cover` plus the safe-area insets keep the tab bar clear of the
+  home indicator in the installed app.
+- The Budget keeps the unassigned figure pinned while scrolling, and plan
+  rows wrap into name and amount, then type, then spending.
+
+Tested at 360, 390 and 820px wide, in both themes.
 
 ## Things left deliberately
 
@@ -128,8 +173,12 @@ node ../tools/smoke.mjs http://localhost:4210/ > /tmp/after.json
 diff /tmp/baseline.json /tmp/after.json     # must be empty
 ```
 
-It is empty as of the Supabase migration: every rendered number is unchanged
-from the original app.
+It was empty as of the Supabase migration: every rendered number unchanged
+from the original app. The redesign changed the words and layout on purpose,
+so the text no longer diffs clean; what was checked instead is that every
+figure the previous version rendered — on those five views, and on Home,
+Activity and Accounts with a full ledger loaded — still appears in the new
+one.
 
 `tools/gate-check.mjs` checks the unauthenticated path — that the app stays
 hidden and the gate renders.

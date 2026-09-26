@@ -2,10 +2,25 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Personal Finance Advisor</title>
+<!-- viewport-fit=cover lets the installed app reach under the notch and the
+     home indicator; the layout pads itself with the safe-area insets. -->
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Finances</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
-<meta name="theme-color" content="#0f1419">
+<meta name="theme-color" content="#f4f5f9" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0b0e14" media="(prefers-color-scheme: dark)">
+<!-- A theme picked in Settings, applied before the first paint so choosing
+     dark on a light device never flashes light. -->
+<script>
+  try {
+    var t = localStorage.getItem('pfa.theme');
+    if (t === 'light' || t === 'dark') {
+      document.documentElement.setAttribute('data-theme', t);
+      var c = t === 'dark' ? '#0b0e14' : '#f4f5f9';
+      document.querySelectorAll('meta[name="theme-color"]').forEach(function (m) { m.setAttribute('content', c); });
+    }
+  } catch (e) {}
+</script>
 
 <!-- Installable on a phone's home screen. -->
 <link rel="manifest" href="/manifest.webmanifest">
@@ -18,54 +33,80 @@
 </head>
 <body>
 <div id="gate"></div>
-<div class="app" id="app" hidden>
+<div class="app" id="app" data-view="dashboard" hidden>
   <aside class="sidebar">
     <div class="brand">
-      <div class="logo">₡</div>
-      <div><h1>Finance Advisor</h1><p>Monthly planning</p></div>
+      <div class="logo">
+        <svg width="22" height="22" viewBox="0 0 32 32" aria-hidden="true"><path d="M5.5 22.5 12 15l5 4 9.5-11" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="26.5" cy="8" r="3.2" fill="#fff"/></svg>
+      </div>
+      <div class="brand-text"><b>Finances</b><span>Plan · track · save</span></div>
     </div>
-    <nav class="nav" id="nav">
-      <button data-view="dashboard" class="active" data-short="Home"><span class="ic">◎</span> <span class="lbl">Dashboard</span></button>
-      <button data-view="plan" data-short="Plan"><span class="ic">✎</span> <span class="lbl">Monthly Plan</span></button>
-      <button data-view="transactions" data-short="Activity"><span class="ic">≡</span> <span class="lbl">Transactions</span></button>
-      <button data-view="accounts" data-short="Accounts"><span class="ic">▣</span> <span class="lbl">Accounts</span></button>
-      <button data-view="goals" data-short="Goals"><span class="ic">◈</span> <span class="lbl">Savings Goals</span></button>
-      <button data-view="annual" data-short="Year"><span class="ic">▤</span> <span class="lbl">Annual Review</span></button>
-      <button data-view="settings" data-short="Settings"><span class="ic">⚙</span> <span class="lbl">Settings</span></button>
+
+    <nav class="nav" id="nav" aria-label="Main">
+      <div class="nav-label">Overview</div>
+      <button type="button" data-view="dashboard" class="active"><i data-icon="home"></i><span class="lbl">Home</span></button>
+      <button type="button" data-view="transactions"><i data-icon="activity"></i><span class="lbl">Activity</span></button>
+      <button type="button" data-view="accounts"><i data-icon="wallet"></i><span class="lbl">Accounts</span></button>
+      <div class="nav-label">Planning</div>
+      <button type="button" data-view="plan"><i data-icon="budget"></i><span class="lbl">Budget</span></button>
+      <button type="button" data-view="goals"><i data-icon="target"></i><span class="lbl">Goals</span></button>
+      <button type="button" data-view="annual"><i data-icon="chart"></i><span class="lbl">Year in review</span></button>
+      <div class="nav-spacer"></div>
+      <button type="button" data-view="settings"><i data-icon="settings"></i><span class="lbl">Settings</span></button>
     </nav>
+
     <div class="side-foot">
-      <span id="acctEmail"></span>
-      <span id="lastSaved"></span>
-      <button class="linkbtn" id="signOutBtn" type="button" hidden>Sign out</button>
+      <div class="me">
+        <span class="avatar" data-avatar></span>
+        <div class="me-text">
+          <span id="acctEmail"></span>
+          <span id="lastSaved"></span>
+        </div>
+        <button class="iconbtn sm plain" id="signOutBtn" type="button" hidden
+                title="Sign out" aria-label="Sign out"><i data-icon="logout"></i></button>
+      </div>
     </div>
   </aside>
 
   <main class="main">
-    <div class="topbar">
-      <div>
-        <h2 id="viewTitle">Financial dashboard</h2>
+    <header class="topbar">
+      <div class="topbar-title">
+        <div class="eyebrow" id="viewEyebrow"></div>
+        <h2 id="viewTitle">Home</h2>
         <div class="sub" id="viewSub"></div>
       </div>
+      <div class="month-pick">
+        <button class="iconbtn" id="prevMonth" type="button" title="Previous month" aria-label="Previous month"><i data-icon="chevron-left"></i></button>
+        <label class="month-label"><span class="sr-only">Month</span><select id="monthSel"></select><i data-icon="chevron-down" data-size="16"></i></label>
+        <button class="iconbtn" id="nextMonth" type="button" title="Next month" aria-label="Next month"><i data-icon="chevron-right"></i></button>
+      </div>
       <div class="topbar-tools">
-        <div class="month-pick">
-          <button class="iconbtn" id="prevMonth" title="Previous month">‹</button>
-          <select id="monthSel"></select>
-          <button class="iconbtn" id="nextMonth" title="Next month">›</button>
-        </div>
         <!-- Reloads the data, not the page: a page reload drops you back on
              the dashboard and loses the month you were looking at. -->
         <button class="iconbtn" id="refreshBtn" type="button"
-                title="Reload from the server" aria-label="Reload from the server">↻</button>
+                title="Reload from the server" aria-label="Reload from the server"><i data-icon="refresh"></i></button>
+        <button class="btn" id="addBtn" type="button"><i data-icon="plus"></i>Add expense</button>
+        <button id="moreBtn" type="button" aria-label="Goals, year in review, settings"><span class="avatar" data-avatar></span></button>
       </div>
-    </div>
+    </header>
     <div id="views"></div>
   </main>
+
+  <!-- The phone's navigation. Four places and the one thing done most often,
+       adding an expense, in the middle where a thumb finds it. -->
+  <nav class="tabbar" id="tabbar" aria-label="Main">
+    <button type="button" data-view="dashboard" class="active"><span class="tb-ic"><i data-icon="home"></i></span>Home</button>
+    <button type="button" data-view="plan"><span class="tb-ic"><i data-icon="budget"></i></span>Budget</button>
+    <div class="fab-slot"><button class="fab" id="fab" type="button" aria-label="Add expense"><i data-icon="plus"></i></button></div>
+    <button type="button" data-view="transactions"><span class="tb-ic"><i data-icon="activity"></i></span>Activity</button>
+    <button type="button" data-view="accounts"><span class="tb-ic"><i data-icon="wallet"></i></span>Accounts</button>
+  </nav>
 </div>
 
 <div class="modal-bg" id="modalBg">
-  <div class="modal" id="modalBox"></div>
+  <div class="modal" id="modalBox" role="dialog" aria-modal="true"></div>
 </div>
-<div class="toast" id="toast"></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
 
   <script type="module" src="/src/main.js"></script>
 </body>

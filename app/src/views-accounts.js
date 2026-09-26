@@ -15,6 +15,8 @@ import { getRepo } from './repo.js';
 import { rateFor, accountById } from './tx.js';
 import { esc, dayKey, dayLabel } from './views-tx.js';
 import { workFor, splitWork, totalByCurrency, isReimbursed, isCompanyPaid } from './work.js';
+import { icon, accountIcon, cardThumb, merchantIcon, bankOf, networkMark, cardArt } from './icons.js';
+import { crShortDate } from './cr-date.js';
 
 /**
  * Lets the actions module force a repaint once a settle has landed. Declared
@@ -30,9 +32,9 @@ export function cachedBalances() { return balances; }
 
 /** Snapshots older than this read as "check me" rather than fact. */
 function staleLabel(b) {
-  if (!b.hasSnapshot) return '<span class="acct-flag acct-never">never set</span>';
-  if (b.stale) return `<span class="acct-flag acct-stale">last set ${esc(b.snapshotDate)}</span>`;
-  return `<span class="muted acct-when">as of ${esc(b.snapshotDate)}</span>`;
+  if (!b.hasSnapshot) return '<span class="pill neutral">never set</span>';
+  if (b.stale) return `<span class="pill warn">${icon('clock')}last set ${esc(crShortDate(b.snapshotDate))}</span>`;
+  return `<span>as of ${esc(crShortDate(b.snapshotDate))}</span>`;
 }
 
 function fmt(amount, currency) {
@@ -87,7 +89,7 @@ export function renderAccounts(views, monthKey) {
     return;
   }
 
-  views.innerHTML = `<div class="card"><p class="muted" style="font-size:13px">Loading accounts…</p></div>`;
+  views.innerHTML = skeleton();
 
   getRepo().listAccountBalances()
     .then((list) => {
@@ -96,53 +98,90 @@ export function renderAccounts(views, monthKey) {
       views.innerHTML = shell(list, monthKey);
     })
     .catch((err) => {
-      views.innerHTML = `<div class="card"><h3>Could not load accounts</h3>
-        <p class="muted" style="font-size:13px">${esc(err.message)}</p></div>`;
+      views.innerHTML = `<div class="card empty">
+        <div class="empty-ic" style="color:var(--neg);background:color-mix(in srgb,var(--neg) 12%,transparent)">${icon('alert')}</div>
+        <h3>Could not load accounts</h3><p>${esc(err.message)}</p></div>`;
     });
 }
 
 /** Forces the next render to re-read from the server. */
 export function invalidateAccounts() { balances = null; loadedFor = null; }
 
+function skelRows(n) {
+  const row = `<div class="skel-row"><div class="skel" style="width:40px;height:40px;border-radius:12px;flex-shrink:0"></div>
+    <div class="skel-lines"><div class="skel skel-line" style="width:40%"></div><div class="skel skel-line" style="width:24%"></div></div>
+    <div class="skel skel-line" style="width:80px"></div></div>`;
+  return row.repeat(n);
+}
+
+function skeleton() {
+  return `<span class="sr-only">Loading accounts…</span>
+    <div class="acct-top" aria-hidden="true">
+      <div class="skel" style="height:184px;border-radius:24px"></div>
+      <div class="grid"><div class="skel" style="height:84px;border-radius:18px"></div><div class="skel" style="height:84px;border-radius:18px"></div></div>
+    </div>
+    <div class="section" aria-hidden="true"><div class="list">${skelRows(3)}</div></div>`;
+}
+
 function shell(list, monthKey) {
   const saved = totals(list, monthKey, ['savings', 'investment', 'cash']);
   const owed = totals(list, monthKey, ['card'], { sign: -1 });
 
   return `
-    ${summary(saved, owed, monthKey)}
+    ${summary(saved, owed, monthKey, list)}
     ${savingsSection(list, monthKey)}
     ${cardsSection(list, monthKey)}
     ${workSection()}
   `;
 }
 
-function summary(saved, owed, monthKey) {
+function summary(saved, owed, monthKey, list) {
   const net = saved.crc - owed.crc;
-  const card = (label, value, sub, colour) => `
-    <div class="card">
-      <h3>${label}</h3>
-      <div class="stat"${colour ? ` style="color:${colour}"` : ''}>${value}</div>
-      <div class="muted" style="font-size:12px;margin-top:3px">${sub}</div>
-    </div>`;
+  const tile = (label, value, sub, ic, tone) => `
+    <section class="card tile">
+      <div class="tile-top"><span class="ti tone-${tone}">${icon(ic)}</span><h3>${label}</h3></div>
+      <div class="stat">${value}</div>
+      <div class="tile-foot">${sub}</div>
+    </section>`;
 
   const unconverted = { ...saved.pending };
   for (const [k, v] of Object.entries(owed.pending)) unconverted[k] = (unconverted[k] || 0) + v;
   const stillPending = Object.entries(unconverted).filter(([, v]) => v !== 0);
 
+  // How much of what you have the cards already spoke for.
+  const share = saved.crc > 0 ? Math.min(100, (owed.crc / saved.crc) * 100) : null;
+  const personal = list.filter((b) => (b.scope || 'personal') === 'personal');
+  const nCards = new Set(personal.filter((b) => b.type === 'card').map((b) => {
+    const a = accountById(b.accountId);
+    return a?.issuer && a?.last4 ? `${a.issuer}:${a.last4}` : b.accountId;
+  })).size;
+
   return `
-  <div class="grid g3" style="margin-bottom:4px">
-    ${card('Saved & cash', money(saved.crc), 'savings, investments, efectivo')}
-    ${card('Owed on cards', money(owed.crc), 'personal cards, work excluded',
-           owed.crc > 0 ? 'var(--need)' : null)}
-    ${card('Net position', money(net), 'what is left after the cards',
-           net < 0 ? 'var(--bad)' : 'var(--good)')}
+  <div class="acct-top">
+    <section class="hero">
+      <div class="hero-label">${icon('wallet')}Net position</div>
+      <div class="hero-value">${money(net)}</div>
+      <div class="hero-sub">What is left of your savings and cash once the cards are paid${net < 0 ? ` &nbsp;<span class="pill">${icon('alert')}in the red</span>` : ''}</div>
+      ${share == null ? '' : `
+      <div class="hero-bar"><i style="width:${share}%"></i></div>
+      <div class="hero-sub">The cards take <b>${Math.round(share)}%</b> of what you have</div>`}
+      <div class="hero-stats">
+        <div><span>Savings & cash accounts</span><b>${list.filter((b) => ['savings', 'investment', 'cash'].includes(b.type)).length}</b></div>
+        <div><span>Personal cards</span><b>${nCards}</b></div>
+      </div>
+    </section>
+    <div class="grid">
+      ${tile('Saved & cash', money(saved.crc), 'savings, investments, efectivo', 'piggy', 'savings')}
+      ${tile('Owed on cards', money(owed.crc), 'personal cards, work excluded', 'card', 'needs')}
+    </div>
   </div>
   ${stillPending.length ? `
-  <div class="card tx-pending">
-    <div>
-      <b>${stillPending.map(([c, v]) => `${c === 'USD' ? '$' : c + ' '}${Math.abs(v).toFixed(2)}`).join(' + ')}</b>
+  <div class="banner tx-pending">
+    <span class="banner-ic">${icon('globe')}</span>
+    <div class="banner-text">
+      <b>${stillPending.map(([c, v]) => fmt(Math.abs(v), c === 'CRC' ? 'CRC' : c)).join(' + ')}</b>
       on foreign-currency accounts
-      <span class="muted">· not in the totals above, no rate set for ${esc(monthKey)}</span>
+      <div class="muted">Not in the totals above — no rate set for ${esc(monthKey)}</div>
     </div>
     <button class="btn ghost sm" onclick="txRateModal()">Set this month's rate</button>
   </div>` : ''}`;
@@ -155,71 +194,127 @@ function summary(saved, owed, monthKey) {
  */
 function cardOn(b) {
   const a = accountById(b.accountId);
-  return a?.last4 ? `<span class="acct-card">card ····${esc(a.last4)}</span>` : '';
+  return a?.last4 ? `<span class="card-tag">${cardThumb(a, { size: 'xs' })}card ••${esc(a.last4)}</span>` : '';
 }
 
-function accountRow(b, monthKey, { owed = false } = {}) {
-  const shown = owed ? Math.abs(b.currentBalance) : b.currentBalance;
+/** A savings, investment or cash account: tap to record what it holds now. */
+function accountRow(b, monthKey) {
+  const a = accountById(b.accountId) || { type: b.type, label: b.label };
   const crc = toCrc(b.currentBalance, b.currency, monthKey);
   const secondary = b.currency === 'CRC' || crc == null
     ? ''
-    : `<span class="acct-crc">${money(Math.abs(crc))}</span>`;
+    : `<small>≈ ${money(Math.abs(crc))}</small>`;
+  const id = esc(b.accountId);
 
   return `
-  <div class="acct-row">
-    <div class="acct-main">
-      <div class="acct-name">${esc(b.label)}</div>
-      <div class="acct-meta">${owed
-        ? '<span class="muted">from your transactions</span>'
-        : `${staleLabel(b)}${cardOn(b)}`}</div>
-      ${!owed && b.pendingFx
-        ? `<div class="acct-warn">${b.pendingFx} foreign charge${b.pendingFx === 1 ? '' : 's'}
-             not in this balance — no exchange rate on record yet</div>`
+  <div class="item tap acct-row" role="button" tabindex="0" title="Update the balance"
+       onclick="acctUpdate('${id}')" onkeydown="if(event.key==='Enter')this.click()">
+    ${accountIcon({ ...a, type: b.type })}
+    <div class="item-main">
+      <div class="item-title"><span class="t">${esc(b.label)}</span></div>
+      <div class="item-sub">${staleLabel(b)}${cardOn(b)}</div>
+      ${b.pendingFx
+        ? `<div class="acct-warn">${icon('alert')}<span>${b.pendingFx} foreign charge${b.pendingFx === 1 ? '' : 's'}
+             not in this balance — no exchange rate on record yet</span></div>`
         : ''}
     </div>
-    <div class="acct-amt">
-      <div>${fmt(shown, b.currency)}${secondary}</div>
+    <div class="item-amt">${fmt(b.currentBalance, b.currency)}${secondary}</div>
+    <div class="item-actions">
+      <button class="btn ghost sm" onclick="event.stopPropagation();acctUpdate('${id}')">Update</button>
+      <button class="iconbtn sm" title="Edit account" aria-label="Edit ${esc(b.label)}"
+              onclick="event.stopPropagation();acctEdit('${id}')">${icon('pencil')}</button>
     </div>
-    ${owed
-      ? `<button class="btn ghost sm" onclick="acctEdit('${esc(b.accountId)}')">Edit</button>`
-      : `<button class="btn ghost sm" onclick="acctUpdate('${esc(b.accountId)}')">Update</button>
-         <button class="btn ghost sm" onclick="acctEdit('${esc(b.accountId)}')">Edit</button>`}
   </div>`;
 }
 
 function savingsSection(list, monthKey) {
   const rows = list.filter((b) => ['savings', 'investment', 'cash'].includes(b.type));
   return `
-  <div class="section-title spread" style="margin-top:22px">
-    <span>Savings &amp; cash</span>
-    <button class="btn ghost sm" onclick="acctAdd()">+ Add account</button>
-  </div>
-  <p class="muted acct-note">
-    Yours to keep current: a transfer or a deposit sends no email, so the app
-    only knows what you tell it. Anything recorded after the date you set is
-    added on top — including card spending, where an account has a card. A
-    foreign charge on such a card is converted by the bank the moment it
-    lands, so it is counted straight away at the month's rate; that figure is
-    a close approximation rather than the bank's own.
-  </p>
-  <div class="card acct-list">
-    ${rows.length
-      ? rows.map((b) => accountRow(b, monthKey)).join('')
-      : '<div class="muted" style="padding:18px;text-align:center;font-size:13px">No savings accounts yet.</div>'}
+  <section class="section">
+    <div class="section-head">
+      <h3>Savings & cash</h3>
+      <button class="btn ghost sm" onclick="acctAdd()">${icon('plus')}Add account</button>
+    </div>
+    <p class="section-note lead">Yours to keep current: a transfer or a deposit sends no email, so the
+      app only knows what you tell it. Tap an account to record what it holds.</p>
+    <div class="list">
+      ${rows.length
+        ? rows.map((b) => accountRow(b, monthKey)).join('')
+        : '<div class="list-empty">No savings accounts yet.</div>'}
+    </div>
+    <p class="section-note" style="margin-top:10px">
+      Anything recorded after the date you set is added on top — including card
+      spending, where an account has a card. A foreign charge on such a card is
+      converted by the bank the moment it lands, so it is counted straight away
+      at the month's rate; that figure is a close approximation rather than the
+      bank's own.
+    </p>
+  </section>`;
+}
+
+/** "BAC VISA ₡" and "BAC VISA $" are one card with two balances. */
+function cardName(label) {
+  return String(label || '').replace(/[₡$]/g, '').replace(/\((work|trabajo)\)/i, '')
+    .replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * One card, drawn as a card, with each balance on it. Tapping a balance
+ * edits that half of the card.
+ */
+function walletCard(group, monthKey) {
+  group.sort((x, y) => (x.b.currency === 'CRC' ? -1 : y.b.currency === 'CRC' ? 1 : 0));
+  const a = group[0].a ?? { label: group[0].b.label, type: 'card' };
+  const bank = bankOf(a);
+  const work = group.some(({ b }) => b.scope === 'work');
+
+  const balance = ({ b }) => {
+    const owed = Math.abs(b.currentBalance);
+    const crc = b.currency === 'CRC' ? null : toCrc(owed, b.currency, monthKey);
+    const cur = b.currency === 'CRC' ? 'Colones' : b.currency === 'USD' ? 'Dollars' : esc(b.currency);
+    return `<button type="button" class="pcard-bal${owed ? '' : ' zero'}" onclick="acctEdit('${esc(b.accountId)}')"
+        aria-label="${esc(b.label)}: ${fmt(owed, b.currency)} owed. Edit">
+      <span>${cur}</span>
+      <b>${fmt(owed, b.currency)}</b>
+      ${b.currency !== 'CRC' && owed ? `<small>${crc == null ? 'not converted' : `≈ ${money(crc)}`}</small>` : ''}
+    </button>`;
+  };
+
+  return `
+  <div class="pcard ${cardArt(a)}">
+    <div class="pcard-top">
+      <div>
+        <div class="pcard-name">${esc(cardName(group[0].b.label))}</div>
+        <span class="pcard-bank">${esc(bank?.name || a.institution || 'Card')}</span>
+      </div>
+      ${networkMark(a.brand) || (bank ? `<span class="nw nw-mono">${bank.mono}</span>` : '')}
+    </div>
+    <div class="pcard-bals">${group.map(balance).join('')}</div>
+    <div class="pcard-foot">
+      <span class="pcard-num">•••• ${esc(a.last4 || '')}</span>
+      ${work ? `<span class="pcard-tag">${icon('briefcase')}Company card</span>` : ''}
+    </div>
   </div>`;
 }
 
 function cardsSection(list, monthKey) {
   const rows = list.filter((b) => b.type === 'card');
+  if (!rows.length) return '';
+  // A colón and a dollar balance that share a number are one physical card.
+  const groups = new Map();
+  for (const b of rows) {
+    const a = accountById(b.accountId);
+    const key = a?.issuer && a?.last4 ? `${a.issuer}:${a.last4}` : b.accountId;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push({ b, a });
+  }
   return `
-  <div class="section-title" style="margin-top:26px"><span>Cards</span></div>
-  <p class="muted acct-note">
-    Card balances are worked out from your transactions, so they move on their
-    own. Each card settles its colón and dollar balances separately.
-  </p>
-  <div class="card acct-list">
-    ${rows.map((b) => accountRow(b, monthKey, { owed: true })).join('')}
-  </div>`;
+  <section class="section">
+    <div class="section-head"><h3>Cards</h3></div>
+    <p class="section-note lead">Worked out from your transactions, so they move on their own. Each card
+      settles its colón and dollar balances separately — tap one to edit it.</p>
+    <div class="wallet">${[...groups.values()].map((g) => walletCard(g, monthKey)).join('')}</div>
+  </section>`;
 }
 
 /**
@@ -233,10 +328,17 @@ function cardsSection(list, monthKey) {
  */
 function workSection() {
   const { rows, loading } = workFor(rerender);
+  const head = (extra = '') => `
+    <div class="section-head">
+      <h3>Work — owed to you</h3>
+      ${extra}
+    </div>
+    <p class="section-note lead">Work spending you paid for yourself, on any card and from any month —
+      reimbursement usually arrives later than the charge. Mark a charge as Work on the
+      Activity tab and it appears here.</p>`;
+
   if (loading) {
-    return `
-    <div class="section-title" style="margin-top:26px"><span>Work — reimbursable</span></div>
-    <div class="card"><p class="muted" style="font-size:13px">Loading work charges…</p></div>`;
+    return `<section class="section">${head()}<div class="list">${skelRows(2)}</div></section>`;
   }
 
   const { owed, settled, companyPaid } = splitWork(rows);
@@ -249,55 +351,49 @@ function workSection() {
     .join(' + ');
 
   return `
-  <div class="section-title spread" style="margin-top:26px">
-    <span>Work — owed to you</span>
-    ${owed.length ? `<span class="muted" style="font-size:13px;font-weight:500">
-      ${esc(amounts)} outstanding</span>` : ''}
-  </div>
-  <p class="muted acct-note">
-    Work spending you paid for yourself, on any card and from any month —
-    reimbursement usually arrives later than the charge. Mark a charge as Work
-    on the Transactions tab and it appears here.
-  </p>
+  <section class="section">
+    ${head(owed.length ? `<span class="work-total">${esc(amounts)} <span class="muted" style="font-weight:500">outstanding</span></span>` : '')}
 
-  ${owed.length ? `
-  <div class="card acct-list">
-    <div class="work-head">
-      <label class="tx-check">
-        <input type="checkbox" id="work_all" onchange="acctSelectAllWork(this.checked)"
-               ${allSelected(owed) ? 'checked' : ''}>
-        <span>${selectedCount() ? `${selectedCount()} selected` : 'Select all'}</span>
-      </label>
-      <button class="btn sm" ${selectedCount() ? '' : 'disabled'}
-              onclick="acctSettleSelected()">Mark reimbursed</button>
-    </div>
-    ${owed.map(workRow).join('')}
-  </div>` : `
-  <div class="card" style="text-align:center;padding:30px 20px">
-    <p class="muted" style="font-size:13px;margin:0">
-      Nothing owed to you. Work expenses you pay for yourself show up here.</p>
-  </div>`}
+    ${owed.length ? `
+    <div class="list">
+      <div class="work-head">
+        <label class="tx-check">
+          <input type="checkbox" id="work_all" onchange="acctSelectAllWork(this.checked)"
+                 ${allSelected(owed) ? 'checked' : ''}>
+          <span>${selectedCount() ? `${selectedCount()} selected` : 'Select all'}</span>
+        </label>
+        <button class="btn sm" ${selectedCount() ? '' : 'disabled'}
+                onclick="acctSettleSelected()">${icon('check')}Mark reimbursed</button>
+      </div>
+      ${owed.map(workRow).join('')}
+    </div>` : `
+    <div class="card empty" style="padding:28px 20px">
+      <div class="empty-ic" style="color:var(--pos);background:color-mix(in srgb,var(--pos-mark) 14%,transparent)">${icon('check-circle')}</div>
+      <h3>Nothing owed to you</h3>
+      <p style="margin-bottom:0">Work expenses you pay for yourself show up here.</p>
+    </div>`}
 
-  ${settled.length ? `
-  <details class="work-settled">
-    <summary>${settled.length} already reimbursed</summary>
-    <div class="card acct-list">
-      ${settled.slice(0, 40).map(workRow).join('')}
-    </div>
-  </details>` : ''}
+    ${settled.length ? `
+    <details class="work-settled">
+      <summary>${icon('chevron-right')}${settled.length} already reimbursed</summary>
+      <div class="list">
+        ${settled.slice(0, 40).map(workRow).join('')}
+      </div>
+    </details>` : ''}
 
-  ${companyPaid.length ? `
-  <details class="work-settled">
-    <summary>${companyPaid.length} paid by the company</summary>
-    <p class="muted acct-note" style="margin-top:8px">
-      Charges on the BNCR card. The company pays that card directly, so these
-      never come out of your pocket and there is nothing to claim back. They
-      are kept out of your personal spending and listed here for reference.
-    </p>
-    <div class="card acct-list">
-      ${companyPaid.slice(0, 40).map(workRow).join('')}
-    </div>
-  </details>` : ''}`;
+    ${companyPaid.length ? `
+    <details class="work-settled">
+      <summary>${icon('chevron-right')}${companyPaid.length} paid by the company</summary>
+      <p class="section-note" style="margin:0 0 10px">
+        Charges on the BNCR card. The company pays that card directly, so these
+        never come out of your pocket and there is nothing to claim back. They
+        are kept out of your personal spending and listed here for reference.
+      </p>
+      <div class="list">
+        ${companyPaid.slice(0, 40).map(workRow).join('')}
+      </div>
+    </details>` : ''}
+  </section>`;
 }
 
 function workRow(t) {
@@ -307,23 +403,25 @@ function workRow(t) {
   const when = dayLabel(dayKey(t.postedAt));
   const company = isCompanyPaid(t);
   const acct = accountById(t.accountId);
+  const name = t.merchant || t.merchantRaw || '(no merchant)';
 
   return `
-  <div class="acct-row work-row${done || company ? ' work-done' : ''}">
-    ${done || company ? '' : `<input type="checkbox" class="work-pick" ${selected.has(t.id) ? 'checked' : ''}
-            onchange="acctPickWork('${esc(t.id)}',this.checked)">`}
-    <div class="acct-main">
-      <div class="acct-name">${esc(t.merchant || t.merchantRaw || '(no merchant)')}</div>
-      <div class="acct-meta muted">
+  <div class="item work-row${done || company ? ' work-done' : ''}">
+    ${done || company ? '' : `<input type="checkbox" class="work-pick" aria-label="Select ${esc(name)}"
+            ${selected.has(t.id) ? 'checked' : ''} onchange="acctPickWork('${esc(t.id)}',this.checked)">`}
+    ${merchantIcon(t, { size: 'sm' })}
+    <div class="item-main">
+      <div class="item-title"><span class="t">${esc(name)}</span></div>
+      <div class="item-sub">
         ${esc(when)}${acct ? ` · ${esc(acct.label)}` : ''}${t.reimbursement?.on ? ` · reimbursed ${esc(dayLabel(t.reimbursement.on))}` : ''}
       </div>
     </div>
-    <div class="acct-amt"><div>${fmt(t.amount, t.currency)}</div></div>
+    <div class="item-amt">${fmt(t.amount, t.currency)}</div>
     ${company
       ? '<span class="work-tag">company</span>'
       : done
-        ? `<button class="btn ghost sm" onclick="acctUnsettle('${esc(t.id)}')">Undo</button>`
-        : `<button class="btn ghost sm" onclick="acctSettleOne('${esc(t.id)}')">Settle</button>`}
+        ? `<button class="btn ghost sm" onclick="acctUnsettle('${esc(t.id)}')">${icon('undo')}Undo</button>`
+        : `<button class="btn soft sm" onclick="acctSettleOne('${esc(t.id)}')">Settle</button>`}
   </div>`;
 }
 
@@ -359,5 +457,3 @@ function cachedWorkRows() {
 
 /** Selections must not survive the rows they point at. */
 export function clearWorkSelection() { selected.clear(); }
-
-

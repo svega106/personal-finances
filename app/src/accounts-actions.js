@@ -9,6 +9,7 @@ import { openModal, closeModal, toast, render } from './app.js';
 import { getRepo } from './repo.js';
 import { getAccounts, loadMonth, saveTransaction } from './tx.js';
 import { esc } from './views-tx.js';
+import { icon, accountIcon } from './icons.js';
 import { crDay } from './cr-date.js';
 import { afterLedgerChange, afterAccountChange } from './refresh.js';
 import { accountPatch } from './account-patch.js';
@@ -33,25 +34,29 @@ export function acctUpdate(accountId) {
   const b = findBalance(accountId);
   if (!b) { toast('Account not found'); return; }
 
+  const acct = getAccounts().find((x) => x.id === accountId) || { type: b.type, label: b.label };
   openModal(`
     <h3>Balance for ${esc(b.label)}</h3>
-    <p class="muted" style="font-size:13px;margin:-4px 0 16px;line-height:1.55">
+    <p class="sheet-sub">
       Enter what the account actually holds right now. Anything you record
       after this date is added on top, so you only need to do this when the
       two have drifted apart.
     </p>
 
-    <div class="tx-2col">
-      <div class="field"><label>Balance (${esc(b.currency)})</label>
-        <input class="inp" id="bal_amount" type="number" step="0.01"
-               value="${b.hasSnapshot ? b.currentBalance : ''}"
-               placeholder="0" autofocus></div>
-      <div class="field"><label>As of</label>
-        <input class="inp" id="bal_date" type="date" value="${today()}"></div>
+    <div class="amount-field">
+      ${accountIcon({ ...acct, type: b.type })}
+      <span class="muted" style="font-weight:700">${b.currency === 'CRC' ? '₡' : '$'}</span>
+      <input class="amount-inp" id="bal_amount" type="number" inputmode="decimal" step="0.01"
+             value="${b.hasSnapshot ? b.currentBalance : ''}" placeholder="0"
+             aria-label="Balance (${esc(b.currency)})">
     </div>
 
-    <div class="field"><label>Note (optional)</label>
-      <input class="inp" id="bal_note" placeholder="e.g. after the December bonus"></div>
+    <div class="tx-2col">
+      <div class="field"><label for="bal_date">As of</label>
+        <input class="inp" id="bal_date" type="date" value="${today()}"></div>
+      <div class="field"><label for="bal_note">Note <span class="faint">(optional)</span></label>
+        <input class="inp" id="bal_note" placeholder="e.g. after the bonus"></div>
+    </div>
 
     <div class="actions">
       <span></span>
@@ -95,41 +100,42 @@ function accountForm(a) {
 
   return `
     <h3>${isNew ? 'Add an account' : esc(a.label)}</h3>
-    <p class="muted" style="font-size:13px;margin:-4px 0 16px;line-height:1.55">
-      ${isNew
+    <p class="sheet-sub">
+      ${isNew ? '' : `${accountIcon(a, { size: 'sm' })}`}
+      <span>${isNew
         ? 'For savings, investments or cash you keep track of yourself.'
-        : 'Renaming is safe at any time — transactions follow the account, not its name.'}
+        : 'Renaming is safe at any time — transactions follow the account, not its name.'}</span>
     </p>
 
-    <div class="field"><label>Name</label>
+    <div class="field"><label for="acc_label">Name</label>
       <input class="inp" id="acc_label" value="${esc(a?.label ?? '')}"
-             placeholder="e.g. Ahorros BAC"${isNew ? ' autofocus' : ''}></div>
+             placeholder="e.g. Ahorros BAC" autocomplete="off"></div>
 
     <div class="tx-2col">
-      <div class="field"><label>Kind</label>
+      <div class="field"><label for="acc_type">Kind</label>
         <select class="inp" id="acc_type"${isCard ? ' disabled' : ''}>
           ${isCard ? '<option value="card" selected>Card</option>' : ''}
           <option value="savings"${type === 'savings' ? ' selected' : ''}>Savings</option>
           <option value="investment"${type === 'investment' ? ' selected' : ''}>Investment</option>
           <option value="cash"${type === 'cash' ? ' selected' : ''}>Cash</option>
         </select></div>
-      <div class="field"><label>Currency</label>
+      <div class="field"><label for="acc_currency">Currency</label>
         <select class="inp" id="acc_currency"${isNew ? '' : ' disabled'}>
           <option value="CRC"${(a?.currency ?? 'CRC') === 'CRC' ? ' selected' : ''}>CRC</option>
           <option value="USD"${a?.currency === 'USD' ? ' selected' : ''}>USD</option>
         </select></div>
     </div>
-    ${isNew ? '' : `<p class="muted" style="font-size:11.5px;margin:-8px 0 14px">
+    ${isNew ? '' : `<p class="field-hint" style="margin:-8px 0 14px">
       Currency is fixed once an account exists — its balance and every charge
       on it are already in that currency. Archive it and add another instead.
     </p>`}
 
-    <div class="field"><label>Bank (optional)</label>
+    <div class="field"><label for="acc_inst">Bank <span class="faint">(optional)</span></label>
       <input class="inp" id="acc_inst" value="${esc(a?.institution ?? '')}"
              placeholder="e.g. BAC Credomatic"></div>
 
     <div class="field">
-      <label>${isCard ? 'Card' : 'Card on this account (optional)'}</label>
+      <label for="acc_issuer">${isCard ? 'Card' : 'Card on this account'} ${isCard ? '' : '<span class="faint">(optional)</span>'}</label>
       <div class="tx-2col">
         <select class="inp" id="acc_issuer">
           <option value=""${a?.issuer ? '' : ' selected'}>${isCard ? '— choose the bank —' : '— no card —'}</option>
@@ -139,7 +145,7 @@ function accountForm(a) {
         <input class="inp" id="acc_last4" value="${esc(a?.last4 ?? '')}"
                placeholder="Last 4 digits" inputmode="numeric" maxlength="4">
       </div>
-      <div class="muted" style="font-size:11.5px;margin-top:5px;line-height:1.45">
+      <div class="field-hint">
         ${isCard
           ? `This is how a charge finds its way here. The bank names the card by
              these four digits and nothing else, so an account without them can
@@ -150,7 +156,7 @@ function accountForm(a) {
 
     <div class="actions">
       ${isNew ? '<span></span>'
-        : `<button class="btn ghost danger" onclick="acctArchive('${esc(a.id)}')">Archive</button>`}
+        : `<button class="btn ghost danger" onclick="acctArchive('${esc(a.id)}')" aria-label="Archive">${icon('archive')}<span class="lbl">Archive</span></button>`}
       <button class="btn ghost" onclick="closeModal()">Cancel</button>
       <button class="btn" id="acc_save">${isNew ? 'Add' : 'Save'}</button>
     </div>`;
@@ -218,11 +224,11 @@ export async function acctArchive(id) {
 
   openModal(`
     <h3>Archive ${esc(a.label)}?</h3>
-    <p class="muted" style="font-size:13px;margin:-4px 0 14px;line-height:1.55">
+    <p class="sheet-sub">
       It stops appearing in lists and totals. Nothing is deleted — the account
       can be brought back, and its history is kept either way.
     </p>
-    ${count ? `<div class="card" style="padding:12px 14px;margin-bottom:16px">
+    ${count ? `<div class="note-card">
       <b>${count} transaction${count === 1 ? '' : 's'}</b>
       ${count === 1 ? 'points' : 'point'} at this account.
       <span class="muted">${count === 1 ? 'It stays' : 'They stay'} in your ledger, but
@@ -289,11 +295,11 @@ export function acctSettleSelected() {
 
   openModal(`
     <h3>Mark ${rows.length} charge${rows.length === 1 ? '' : 's'} reimbursed</h3>
-    <p class="muted" style="font-size:13px;margin:-4px 0 16px;line-height:1.55">
+    <p class="sheet-sub">
       The charges stay in your history — only their status changes. You can
       undo any of them afterwards.
     </p>
-    <div class="field"><label>Reimbursed on</label>
+    <div class="field"><label for="rb_date">Reimbursed on</label>
       <input class="inp" id="rb_date" type="date" value="${today()}"></div>
     <div class="actions">
       <span></span>

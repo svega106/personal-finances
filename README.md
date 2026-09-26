@@ -20,7 +20,7 @@ cd supabase        # follow README.md: create the project, run migrations
 cd ../app
 cp .env.example .env.local   # fill in Supabase URL + anon key
 npm install
-npm run dev
+npm run dev                  # open /?demo for sample data without signing in
 ```
 
 ## Tests

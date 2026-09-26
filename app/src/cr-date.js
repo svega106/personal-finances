@@ -56,6 +56,31 @@ export function crTimeLabel(iso) {
   });
 }
 
+/** The hour of the day in Costa Rica, 0–23 — for saying good morning. */
+export function crHour(when = new Date()) {
+  return Number(new Date(when).toLocaleString('en-US', {
+    hour: 'numeric', hourCycle: 'h23', timeZone: ZONE,
+  }));
+}
+
+/** A day written out in full: "Friday, September 25". */
+export function crLongDate(when = new Date()) {
+  return new Date(when).toLocaleDateString('en-US', {
+    weekday: 'long', month: 'long', day: 'numeric', timeZone: ZONE,
+  });
+}
+
+/**
+ * A day key as a short date — "Sep 25" — with the year only when it is not
+ * this one. Built from local noon, like `crDayLabel`.
+ */
+export function crShortDate(key, now = new Date()) {
+  const sameYear = key.split('-')[0] === crDay(now).split('-')[0];
+  return new Date(`${key}T12:00:00${CR_OFFSET}`).toLocaleDateString('en-US', {
+    month: 'short', day: 'numeric', ...(sameYear ? {} : { year: 'numeric' }), timeZone: ZONE,
+  });
+}
+
 /**
  * A date the user picked, as an instant.
  *

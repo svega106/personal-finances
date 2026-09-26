@@ -4,14 +4,15 @@
  * Kept out of views-tx.js so the rendering module has no dependency on app.js,
  * which would create an import cycle.
  */
-import { openModal, closeModal, toast, render } from './app.js';
+import { openModal, closeModal, toast, render, getActiveView } from './app.js';
 import { getAccounts, accountById, matchRule, saveTransaction, removeTransaction, rateFor, setMonthRate, budgetLines } from './tx.js';
-import { getMonth, money } from './state.js';
+import { getMonth, money, monthLabel } from './state.js';
 import { initialReimbursement } from './work.js';
 import { findRow, blankTx, CATS, esc, flashRow, onFlashHidden } from './views-tx.js';
 import { crDay, crMonth, crNoon } from './cr-date.js';
 import { afterLedgerChange } from './refresh.js';
 import { txFilters } from './views-tx.js';
+import { icon } from './icons.js';
 
 let editing = null;
 
@@ -24,10 +25,18 @@ export function txSetFilter(key, value) {
   render();
 }
 
+export function txClearFilters() {
+  Object.assign(txFilters(), { account: 'all', cat: 'all', unreviewedOnly: false });
+  render();
+}
+
 export function txEdit(id) {
   const monthKey = window.__txMonth || crMonth(new Date());
-  editing = id ? { ...findRow(id) } : blankTx(monthKey);
-  if (!editing) { toast('Transaction not found'); return; }
+  // Spreading a missing row gives `{}`, which is truthy — checked before the
+  // copy, or an unknown id opens an empty sheet instead of saying so.
+  const row = id ? findRow(id) : null;
+  if (id && !row) { toast('Transaction not found'); return; }
+  editing = row ? { ...row } : blankTx(monthKey);
   openModal(sheet(editing));
   wireSheet();
 }
@@ -42,35 +51,31 @@ function sheet(t) {
 
   return `
     <h3>${isNew ? 'Add expense' : 'Edit transaction'}</h3>
-    ${t.source === 'email' ? `<p class="muted" style="font-size:12px;margin:-6px 0 14px">
-      From your bank email · ${esc(t.merchantRaw || '')}
-      ${t.authCode ? ` · auth ${esc(t.authCode)}` : ''}</p>` : ''}
+    ${t.source === 'email' ? `<p class="sheet-sub">${icon('mail')}<span>From your bank email · ${esc(t.merchantRaw || '')}${t.authCode ? ` · auth ${esc(t.authCode)}` : ''}</span></p>`
+      : isNew ? '<p class="sheet-sub">Cash, a transfer, anything a bank email will not bring in.</p>' : ''}
 
-    <div class="field"><label>Description</label>
+    <div class="amount-field">
+      <select class="amount-cur" id="tx_currency" aria-label="Currency">
+        <option value="CRC"${t.currency === 'CRC' ? ' selected' : ''}>₡ CRC</option>
+        <option value="USD"${t.currency === 'USD' ? ' selected' : ''}>$ USD</option>
+      </select>
+      <input class="amount-inp" id="tx_amount" type="number" inputmode="decimal" step="0.01"
+             value="${t.amount || ''}" placeholder="0" aria-label="Amount">
+    </div>
+
+    <p class="sheet-sub tx-fx-row" style="margin:-6px 0 14px" ${t.currency === 'CRC' ? 'hidden' : ''}>
+      ${icon('globe')}<span>Foreign charges sit on that card's own balance. They convert at the
+      month's rate, set once from the Activity list.</span>
+    </p>
+
+    <div class="field"><label for="tx_name">Description</label>
       <input class="inp" id="tx_name" value="${esc(t.merchant || t.merchantRaw || '')}"
-             placeholder="e.g. Auto Mercado"></div>
+             placeholder="e.g. Auto Mercado" autocomplete="off"></div>
 
     <div class="tx-2col">
-      <div class="field"><label>Amount</label>
-        <input class="inp" id="tx_amount" type="number" step="0.01"
-               value="${t.amount || ''}" placeholder="0"></div>
-      <div class="field"><label>Currency</label>
-        <select class="inp" id="tx_currency">
-          <option value="CRC"${t.currency === 'CRC' ? ' selected' : ''}>CRC</option>
-          <option value="USD"${t.currency === 'USD' ? ' selected' : ''}>USD</option>
-        </select></div>
-    </div>
-
-    <div class="muted tx-fx-row" style="font-size:12px;margin:-6px 0 14px;line-height:1.5"
-         ${t.currency === 'CRC' ? 'hidden' : ''}>
-      Foreign charges sit on that card's own balance. They convert at the
-      month's rate, set once from the transactions list.
-    </div>
-
-    <div class="tx-2col">
-      <div class="field"><label>Date</label>
+      <div class="field"><label for="tx_date">Date</label>
         <input class="inp" id="tx_date" type="date" value="${date}"></div>
-      <div class="field"><label>Account</label>
+      <div class="field"><label for="tx_account">Account</label>
         <select class="inp" id="tx_account">
           <option value="">—</option>
           ${accs.map((a) => `<option value="${esc(a.id)}"${t.accountId === a.id ? ' selected' : ''}>${esc(a.label)}</option>`).join('')}
@@ -78,35 +83,35 @@ function sheet(t) {
     </div>
 
     <div class="tx-2col">
-      <div class="field"><label>Category</label>
+      <div class="field"><label for="tx_cat">Category</label>
         <select class="inp" id="tx_cat">
-          <option value="">Unbudgeted</option>
+          <option value="">Uncategorized</option>
           ${CATS.map(([k, l]) => `<option value="${k}"${t.cat === k ? ' selected' : ''}>${l}</option>`).join('')}
         </select></div>
-      <div class="field"><label>Scope</label>
+      <div class="field"><label for="tx_scope">Scope</label>
         <select class="inp" id="tx_scope">
           <option value="personal"${t.scope === 'personal' ? ' selected' : ''}>Personal</option>
           <option value="work"${t.scope === 'work' ? ' selected' : ''}>Work</option>
         </select></div>
     </div>
 
-    <div class="field"><label>Budget line</label>
+    <div class="field"><label for="tx_line">Budget line</label>
       ${lineOptions(t)}
-      <div class="muted" style="font-size:11.5px;margin-top:5px;line-height:1.45">
+      <div class="field-hint">
         Attach this to a line from the month's plan and it counts against it.
         Left unattached, it still counts towards its category.
       </div></div>
 
-    <div class="field"><label>Note (optional)</label>
+    <div class="field"><label for="tx_note">Note <span class="faint">(optional)</span></label>
       <input class="inp" id="tx_note" value="${esc(t.note || '')}"></div>
 
     ${t.source === 'email' && !t.reviewed
-      ? `<label class="tx-check" style="margin-bottom:12px">
+      ? `<label class="check" style="margin-bottom:6px">
            <input type="checkbox" id="tx_rule" checked> Remember this merchant for next time
          </label>` : ''}
 
     <div class="actions">
-      ${t.id ? `<button class="btn ghost danger" onclick="txDelete()">Delete</button>` : '<span></span>'}
+      ${t.id ? `<button class="btn ghost danger" onclick="txDelete()" aria-label="Delete">${icon('trash')}<span class="lbl">Delete</span></button>` : '<span></span>'}
       <button class="btn ghost" onclick="closeModal()">Cancel</button>
       <button class="btn" id="tx_save">Save</button>
     </div>`;
@@ -216,8 +221,10 @@ export async function txSave() {
     const saved = await saveTransaction(t);
     const wasEdit = Boolean(editing.id);
     closeModal();
-    // Marked before the repaint, so the row is drawn already highlighted.
-    flashRow(saved?.id ?? t.id);
+    // Marked before the repaint, so the row is drawn already highlighted. Only
+    // on the Activity list: added from anywhere else there is no row to find,
+    // and a mark left waiting would flash on some later, unrelated visit.
+    if (getActiveView() === 'transactions') flashRow(saved?.id ?? t.id);
     await afterLedgerChange(crMonth(t.postedAt));
     toast(wasEdit ? 'Transaction updated' : 'Transaction added');
   } catch (err) {
@@ -248,16 +255,19 @@ export function txRateModal() {
   const current = rateFor(month, 'USD');
 
   openModal(`
-    <h3>Exchange rate for ${esc(month)}</h3>
-    <p class="muted" style="font-size:13px;margin:-4px 0 16px;line-height:1.55">
+    <h3>Exchange rate for ${esc(monthLabel(month))}</h3>
+    <p class="sheet-sub">
       Colones per US dollar, as the dollar balance was actually settled.
-      Every USD charge dated ${esc(month)} is converted at this rate — nothing
-      is converted until you set it.
+      Every USD charge dated in ${esc(monthLabel(month))} is converted at this
+      rate — nothing is converted until you set it.
     </p>
-    <div class="field"><label>₡ per $1</label>
-      <input class="inp" id="fx_rate" type="number" step="0.01"
-             value="${current ?? ''}" placeholder="e.g. 449.49" autofocus></div>
+    <div class="amount-field">
+      <span class="amount-cur" style="display:grid;place-items:center;background:var(--surface);padding:0 12px">₡ per $1</span>
+      <input class="amount-inp" id="fx_rate" type="number" inputmode="decimal" step="0.01"
+             value="${current ?? ''}" placeholder="449.49" aria-label="Colones per US dollar">
+    </div>
     <div class="actions">
+      <span></span>
       <button class="btn ghost" onclick="closeModal()">Cancel</button>
       <button class="btn" id="fx_save">Save</button>
     </div>`);

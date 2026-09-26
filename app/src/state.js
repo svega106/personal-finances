@@ -200,13 +200,14 @@ function status(kind, detail) {
   if (onStatus) onStatus(kind, detail);
   const el = typeof document !== 'undefined' && document.getElementById('lastSaved');
   if (!el) return;
+  el.dataset.state = kind; // colours the dot beside it
   if (kind === 'saving') el.textContent = 'Saving…';
   else if (kind === 'error') el.textContent = 'Not saved — retrying';
   else if (kind === 'dirty') el.textContent = 'Unsaved changes';
   else if (state.lastSaved) {
     el.textContent = 'Saved ' + new Date(state.lastSaved)
       .toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-  }
+  } else el.textContent = 'All changes saved';
 }
 
 /** Last chance to persist when the tab goes away. */

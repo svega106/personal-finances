@@ -185,7 +185,7 @@ await page.waitForSelector('.tx-row', { timeout: 5000 });
 check('rows shown for September', await page.locator('.tx-row').count(), 5);
 check('days grouped', await page.locator('.tx-day').count(), 3);
 
-const stats = await page.locator('.grid.g4 .stat').allInnerTexts();
+const stats = await page.locator('.tx-summary [data-stat]').allInnerTexts();
 // Colon personal charges only: 6,980 + 12,450 + 89,000. Both USD charges
 // are excluded because September has no rate yet.
 check('USD stays out of the totals', stats[0], '₡108,430');
@@ -218,7 +218,7 @@ await page.fill('#fx_rate', '449.49');
 await page.click('#fx_save');
 await page.waitForTimeout(500);
 
-const afterFx = await page.locator('.grid.g4 .stat').allInnerTexts();
+const afterFx = await page.locator('.tx-summary [data-stat]').allInnerTexts();
 // Only the personal USD charge joins the total: 108,430 + 61.90 x 449.49.
 // The work-card $79.96 stays out, exactly as it does in colones.
 check('USD folded in once the rate is set', afterFx[0], '\u20a1136,253');
@@ -239,7 +239,7 @@ await page.click('#tx_save');
 await page.waitForTimeout(600);
 
 check('row added', await page.locator('.tx-row').count(), 6);
-const stats2 = await page.locator('.grid.g4 .stat').allInnerTexts();
+const stats2 = await page.locator('.tx-summary [data-stat]').allInnerTexts();
 check('total includes manual entry', stats2[0], '₡154,753'); // 136,253 + 18,500
 
 const stored = await page.evaluate(() => {
@@ -259,14 +259,14 @@ await page.waitForTimeout(600);
 check('badge cleared after review',
   await page.locator('#nav button[data-view="transactions"] .badge').count(), 0);
 
-const stats3 = await page.locator('.grid.g4 .stat').allInnerTexts();
+const stats3 = await page.locator('.tx-summary [data-stat]').allInnerTexts();
 check('uncategorized drops after categorizing', stats3[3], '₡0');
 
 // ------------------------------------------------- other views unaffected
 await page.evaluate(() => window.setView('dashboard'));
 await page.waitForTimeout(300);
 check('dashboard still renders',
-  (await page.locator('#views').innerText()).includes('FINANCIAL HEALTH'), true);
+  /financial health/i.test(await page.locator('#views').innerText()), true);
 
 out.pageErrors = errors.length ? errors : 'none';
 await browser.close();

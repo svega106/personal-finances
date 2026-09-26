@@ -1,3 +1,4 @@
+import '@fontsource-variable/inter/opsz.css';
 import './styles.css';
 import { init, save, flush, state } from './state.js';
 import { setRepo, hasInjectedRepo, getRepo } from './repo.js';
@@ -8,9 +9,9 @@ import {
   updIncome, updInvest, updItem, addItem, delItem, updContribution, copyMonth,
   clearMonth, goalModal, saveGoal, delGoal, addToGoal, confirmAddGoal, updAlloc,
   liveAlloc, setAlloc, exportData, importData, resetAll, closeModal, updCarryover,
-  useCarryover, gotoMonth, stepYear,
+  useCarryover, gotoMonth, stepYear, setTheme, openMore, setUser,
 } from './app.js';
-import { txSetFilter, txEdit, txSave, txDelete, txRateModal } from './tx-actions.js';
+import { txSetFilter, txClearFilters, txEdit, txSave, txDelete, txRateModal } from './tx-actions.js';
 import {
   acctUpdate, acctAdd, acctEdit, acctArchive, acctPickWork, acctSelectAllWork,
   acctSettleOne, acctSettleSelected, acctUnsettle,
@@ -20,27 +21,58 @@ import { updateNavBadge } from './views-tx.js';
 import { crMonth } from './cr-date.js';
 import { refreshAll } from './refresh.js';
 import { toast } from './app.js';
+import { icon } from './icons.js';
 
-function showApp(email) {
+const VIEWS = ['dashboard', 'plan', 'transactions', 'accounts', 'goals', 'annual', 'settings'];
+
+/** The static shell names its icons; draw them from the one icon set. */
+function hydrateIcons() {
+  document.querySelectorAll('i[data-icon]').forEach((el) => {
+    el.outerHTML = icon(el.dataset.icon, { size: Number(el.dataset.size) || 20 });
+  });
+}
+
+function showApp(user) {
   document.getElementById('gate').innerHTML = '';
   document.getElementById('app').hidden = false;
-  const e = document.getElementById('acctEmail');
-  if (e && email) e.textContent = email;
+  setUser(user ?? {});
   const out = document.getElementById('signOutBtn');
-  if (out && email) {
+  if (out && user?.email) {
     out.hidden = false;
     out.addEventListener('click', () => signOut());
   }
 }
 
+/** What the session says about who is signed in, for the greeting and avatar. */
+function userOf(session) {
+  const u = session?.user;
+  if (!u) return null;
+  const meta = u.user_metadata || {};
+  return {
+    email: u.email ?? '',
+    name: meta.full_name || meta.name || '',
+    avatar: meta.avatar_url || meta.picture || '',
+  };
+}
+
 function wire() {
-  document.getElementById('nav').addEventListener('click', e => {
-    const b = e.target.closest('button'); if (b) setView(b.dataset.view);
-  });
+  const onNav = (e) => {
+    const b = e.target.closest('button[data-view]'); if (b) setView(b.dataset.view);
+  };
+  document.getElementById('nav').addEventListener('click', onNav);
+  document.getElementById('tabbar').addEventListener('click', onNav);
   document.getElementById('monthSel').addEventListener('change', e => setCurrentMonth(e.target.value));
   document.getElementById('prevMonth').addEventListener('click', () => shiftCurrentMonth(-1));
   document.getElementById('nextMonth').addEventListener('click', () => shiftCurrentMonth(1));
   document.getElementById('refreshBtn')?.addEventListener('click', doRefresh);
+  document.getElementById('addBtn')?.addEventListener('click', () => txEdit());
+  document.getElementById('fab')?.addEventListener('click', () => txEdit());
+  document.getElementById('moreBtn')?.addEventListener('click', () => openMore());
+
+  // Escape closes a sheet, as it would any dialog.
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && document.getElementById('modalBg').classList.contains('show')) closeModal();
+  });
 
   window.setView = setView;
   window.render = render;
@@ -50,10 +82,17 @@ function wire() {
     updIncome, updInvest, updItem, addItem, delItem, updContribution, copyMonth, clearMonth,
     goalModal, saveGoal, delGoal, addToGoal, confirmAddGoal, updAlloc, liveAlloc, setAlloc,
     exportData, importData, resetAll, closeModal, updCarryover, useCarryover, gotoMonth, stepYear,
-    txSetFilter, txEdit, txSave, txDelete, txRateModal,
+    setTheme, openMore, doSignOut: () => signOut(),
+    txSetFilter, txClearFilters, txEdit, txSave, txDelete, txRateModal,
     acctUpdate, acctAdd, acctEdit, acctArchive, acctPickWork, acctSelectAllWork,
     acctSettleOne, acctSettleSelected, acctUnsettle,
   });
+}
+
+/** `/?view=transactions` opens there — the home-screen shortcuts use it. */
+function firstView() {
+  const v = new URLSearchParams(window.location.search).get('view');
+  return VIEWS.includes(v) ? v : 'dashboard';
 }
 
 /**
@@ -90,6 +129,14 @@ async function doRefresh() {
 }
 
 async function boot() {
+  hydrateIcons();
+
+  // `/?demo` on the dev server: sample data held in memory, so the screens can
+  // be worked on without touching the real database. Never in a build.
+  if (import.meta.env.DEV && new URLSearchParams(window.location.search).has('demo')) {
+    (await import('./demo.js')).installDemoRepo();
+  }
+
   // Tests inject a repository and skip the gate entirely.
   if (hasInjectedRepo()) {
     setRepo(getRepo());
@@ -107,7 +154,7 @@ async function boot() {
     }
     showApp(null);
     wire();
-    setView('dashboard');
+    setView(firstView());
     return;
   }
 
@@ -127,9 +174,9 @@ async function boot() {
     return;
   }
 
-  showApp(session.user?.email ?? null);
+  showApp(userOf(session));
   wire();
-  setView('dashboard');
+  setView(firstView());
 
   // Populate the review badge without making the user open the view first.
   loadMonth(crMonth(new Date()))

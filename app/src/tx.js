@@ -10,7 +10,7 @@
  * transaction is a deliberate action, not typing.
  */
 import { getRepo } from './repo.js';
-import { crMonth, CR_OFFSET } from './cr-date.js';
+import { crDay, crMonth, CR_OFFSET } from './cr-date.js';
 import { matchRule as sharedMatchRule } from '../../supabase/functions/_shared/classify.js';
 
 /** month key -> transactions, so switching months back and forth is free. */
@@ -83,6 +83,19 @@ export async function loadMonth(key, { force = false } = {}) {
 
 export function cachedMonth(key) {
   return byMonth.get(key) ?? null;
+}
+
+/**
+ * A transaction from any month already loaded. The dashboard lists recent
+ * charges without the ledger view ever having been opened, so editing one
+ * cannot rely on that view's rows.
+ */
+export function findCached(id) {
+  for (const rows of byMonth.values()) {
+    const t = rows.find((x) => x.id === id);
+    if (t) return t;
+  }
+  return null;
 }
 
 function invalidate(key) { byMonth.delete(key); }
@@ -167,6 +180,23 @@ export function spendTotals(rows) {
       out.unbudgeted += crc;
       if (t.cat && out.unbudgetedByCat[t.cat] !== undefined) out.unbudgetedByCat[t.cat] += crc;
     }
+  }
+  return out;
+}
+
+/**
+ * Spending per Costa Rica day, by exactly the rules `spendTotals` uses for
+ * its total — personal expenses only, and a foreign charge only once its
+ * month has a rate — so a running sum of these ends on the same figure.
+ */
+export function spendByDay(rows) {
+  const out = {};
+  for (const t of rows ?? []) {
+    if (t.status === 'voided' || t.scope === 'work' || t.kind !== 'expense') continue;
+    const crc = effectiveCrc(t);
+    if (crc == null) continue;
+    const day = crDay(t.postedAt);
+    out[day] = (out[day] || 0) + crc;
   }
   return out;
 }
