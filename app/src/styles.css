@@ -1302,6 +1302,64 @@ body.sheet-open { overflow: hidden; }
 .gate-points .i { width: 14px; height: 14px; color: var(--pos); }
 .gate code { font-size: 12.5px; background: var(--surface-2); padding: 1px 5px; border-radius: 5px; }
 
+/* ------------------------------------------- transfers, income, cutoffs */
+
+.section-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+
+/* What a transfer or income leaves behind, as it is typed. */
+.move-hint {
+  display: flex; flex-direction: column; gap: 4px; margin: -6px 0 16px; min-height: 18px;
+  font-size: 12.5px; color: var(--muted); line-height: 1.5;
+}
+.move-hint:empty { display: none; }
+.move-hint.bad { flex-direction: row; align-items: flex-start; gap: 7px; color: var(--neg); font-weight: 550; }
+.move-hint.bad .i { margin-top: 2px; }
+
+/* The + chooser */
+.choose-list { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
+.choose-row {
+  display: flex; align-items: center; gap: 14px; width: 100%; padding: 14px;
+  border-radius: 16px; border: 1px solid var(--line); background: var(--surface-2);
+  text-align: left; color: var(--text); transition: background .15s, border-color .15s;
+}
+.choose-row:hover { border-color: var(--line-2); background: var(--surface-3); }
+.choose-row > .i:last-child { color: var(--faint); }
+.choose-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.choose-text b { font-size: 15px; font-weight: 650; }
+.choose-text span { font-size: 12.5px; color: var(--muted); }
+
+/* Card cutoffs on the dashboard */
+.cutoff-row {
+  display: flex; align-items: center; gap: 12px; padding: 11px 10px; margin: 0 -10px;
+  border-radius: 12px; cursor: pointer; transition: background .12s;
+}
+.cutoff-row + .cutoff-row { margin-top: 2px; }
+.cutoff-row:hover { background: var(--surface-2); }
+.cutoff-days {
+  display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0;
+  height: 26px; padding: 0 10px; border-radius: 99px;
+  background: var(--surface-3); color: var(--text-2);
+  font-size: 12.5px; font-weight: 650; font-variant-numeric: tabular-nums;
+}
+/* Inside the card's own warning window: the colour carries it, and the
+   alert icon and "closing soon" count say it without the colour too. */
+.cutoff-row.warn { background: color-mix(in srgb, var(--warn-mark) 9%, transparent); }
+.cutoff-row.warn .cutoff-days { background: color-mix(in srgb, var(--warn-mark) 20%, transparent); color: var(--warn); }
+
+/* ... and on the card tile itself */
+.pcard-cutoff {
+  display: inline-flex; align-items: center; gap: 6px; align-self: flex-start;
+  height: 24px; padding: 0 10px 0 8px; border-radius: 99px;
+  background: rgba(255, 255, 255, .16); font-size: 11.5px; font-weight: 600;
+}
+.pcard-cutoff .i { width: 13px; height: 13px; }
+.pcard-cutoff.warn { background: #fff4d6; color: #7a4a00; }
+
+.push-note { display: flex; gap: 10px; align-items: flex-start; font-size: 13px; line-height: 1.5; color: var(--text-2); }
+.push-note .i { color: var(--accent-text); margin-top: 1px; }
+.push-note b { display: block; color: var(--text); font-weight: 650; }
+.set-text b .i { display: inline-block; vertical-align: -2px; color: var(--pos); margin-right: 4px; }
+
 /* ============================================================ breakpoints */
 
 /* A laptop with the sidebar still there: four stat tiles no longer fit

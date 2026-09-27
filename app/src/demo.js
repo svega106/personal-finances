@@ -170,6 +170,16 @@ export function installDemoRepo() {
   const prev = shiftMonth(month, -1);
   const today = Number(crDay(now).split('-')[2]);
 
+  // Cutoffs relative to today, so the dashboard always has one inside its
+  // warning window, one just outside, and one a few weeks off.
+  const [y, m] = month.split('-').map(Number);
+  const day = (ahead) => new Date(Date.UTC(y, m - 1, today + ahead)).getUTCDate();
+  const cutoffs = { visa: [day(2), 3], amex: [day(5), 3], davi: [day(18), 5] };
+  for (const a of ACCOUNTS) {
+    const key = a.id.includes('visa') ? 'visa' : a.id.includes('amex') ? 'amex' : a.id.includes('davi') ? 'davi' : null;
+    if (key) [a.cutoffDay, a.cutoffWarnDays] = cutoffs[key];
+  }
+
   const months = {};
   for (let i = 8; i >= 1; i -= 1) {
     const key = shiftMonth(month, -i);

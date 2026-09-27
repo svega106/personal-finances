@@ -4,11 +4,13 @@ import {
 } from './state.js';
 import { renderTransactions, amountCell, dayName } from './views-tx.js';
 import { renderAccounts } from './views-accounts.js';
-import { actualsFor, cachedMonth, spendByDay } from './tx.js';
+import { actualsFor, cachedMonth, spendByDay, getAccounts, accountById } from './tx.js';
 import { healthScore } from './scoring.js';
-import { icon, merchantIcon, goalIconName, goalTint } from './icons.js';
+import { icon, merchantIcon, goalIconName, goalTint, cardThumb } from './icons.js';
 import { chartSlot, drawCharts, resetCharts, donut } from './charts.js';
-import { crDay, crMonth, crHour, crLongDate, crTimeLabel } from './cr-date.js';
+import { crDay, crMonth, crHour, crLongDate, crTimeLabel, crShortDate } from './cr-date.js';
+import { upcomingCutoffs } from '../../supabase/functions/_shared/cutoff.js';
+import { pushState, enablePush, disablePush, testNotification } from './push.js';
 
 let currentMonth = monthKey();
 let annualYear = +currentMonth.slice(0,4);
@@ -275,12 +277,15 @@ function renderDashboard(){
   // Two columns of their own rather than rows of pairs: these cards differ a
   // lot in height, and a row is as tall as its tallest card. Each carries its
   // place in the single column a phone shows them in.
-  const place = (card, order) => `<div style="--o:${order}">${card}</div>`;
+  const place = (card, order) => (card ? `<div style="--o:${order}">${card}</div>` : '');
+  // Cutoffs lead: a statement about to close is the one thing here with a
+  // deadline. On a phone it comes first in this list, too.
+  const cutoffs = place(cutoffsCard(), 0);
   const [left, right] = hasActuals
-    ? [[place(recentCard(rows), 1), place(allocationCard(c), 4), place(netWorthCard(c), 5)],
-       [place(goalsCard(), 2), place(targetsCard(c, act, true), 3), place(tipsCard(adv), 6)]]
+    ? [[place(recentCard(rows), 1), place(netWorthCard(c), 5), place(tipsCard(adv), 6)],
+       [cutoffs, place(goalsCard(), 2), place(targetsCard(c, act, true), 3), place(allocationCard(c), 4)]]
     : [[place(targetsCard(c, act, false), 1), place(netWorthCard(c), 4)],
-       [place(allocationCard(c), 2), place(goalsCard(), 3), place(tipsCard(adv), 5)]];
+       [cutoffs, place(allocationCard(c), 2), place(goalsCard(), 3), place(tipsCard(adv), 5)]];
 
   views.innerHTML = `
     <div class="dash-top">
@@ -450,6 +455,49 @@ function recentCard(rows){
       <button class="card-link" onclick="setView('transactions')">See all${icon('chevron-right')}</button>
     </div>
     ${list.length ? list.map(item).join('') : '<div class="list-empty">No transactions this month yet.</div>'}
+  </section>`;
+}
+
+/**
+ * Each credit card's next billing cutoff, soonest first, with the ones inside
+ * their own warning window marked. The same module decides this for the
+ * reminder job, so what the dashboard warns about is what gets sent.
+ */
+function cutoffsCard(){
+  const accounts = getAccounts();
+  if (!accounts.some((a) => a.type === 'card')) return '';
+  const list = upcomingCutoffs(accounts, crDay(new Date()));
+
+  if (!list.length) {
+    return `<section class="card">
+      <div class="card-head"><div><h3>Card cutoffs</h3>
+        <div class="card-sub">Set each card's billing cutoff to see it here, and to be reminded before it closes.</div></div></div>
+      <button class="btn soft sm" onclick="setView('accounts')">${icon('card')}Set cutoffs on Accounts</button>
+    </section>`;
+  }
+
+  const soon = list.filter((c) => c.warning).length;
+  const when = (d) => (d === 0 ? 'Today' : d === 1 ? 'Tomorrow' : `${d} days`);
+  const row = (c) => {
+    const acct = accountById(c.accountIds[0]);
+    return `<div class="cutoff-row${c.warning ? ' warn' : ''}" role="button" tabindex="0"
+        onclick="acctEdit('${esc(c.accountIds[0])}')" onkeydown="if(event.key==='Enter')this.click()"
+        title="Change this card's cutoff or reminder">
+      ${acct ? cardThumb(acct, { size: 'sm' }) : ''}
+      <div class="item-main">
+        <div class="item-title"><span class="t">${esc(c.name)}</span></div>
+        <div class="item-sub">Closes ${esc(crShortDate(c.cutoffDate))} · reminder ${c.warnDays} day${c.warnDays === 1 ? '' : 's'} before</div>
+      </div>
+      <span class="cutoff-days">${c.warning ? icon('alert', { size: 14 }) : ''}${when(c.daysLeft)}</span>
+    </div>`;
+  };
+
+  return `<section class="card">
+    <div class="card-head" style="margin-bottom:6px">
+      <div><h3>Card cutoffs</h3><div class="card-sub">When each statement closes</div></div>
+      ${soon ? pill(`${icon('alert')}${soon} closing soon`, 'warn') : ''}
+    </div>
+    ${list.map(row).join('')}
   </section>`;
 }
 
@@ -973,6 +1021,12 @@ function renderSettings(){
     </div>
     <div class="stack">
       <section class="card">
+        <div class="card-head"><div><h3>Cutoff reminders</h3>
+          <div class="card-sub">A notification on this device before each credit card's statement closes.
+            When, and how many days ahead, is set on each card — Accounts, then tap a card's balance.</div></div></div>
+        <div id="pushBody" aria-live="polite"><div class="skel skel-line" style="width:60%;height:14px"></div></div>
+      </section>
+      <section class="card">
         <div class="card-head"><div><h3>Data</h3><div class="card-sub">Saved to your account and synced to every device you sign in on. Export a backup whenever you like.</div></div></div>
         <div class="data-actions">
           <button class="btn ghost" onclick="exportData()">${icon('download')}Export backup (JSON)</button>
@@ -988,6 +1042,71 @@ function renderSettings(){
       </section>` : ''}
     </div>
   </div>`;
+  paintPush();
+}
+
+/**
+ * The reminder switch, drawn from what this browser can actually do. Each
+ * state says what it means and, where there is one, what to do about it.
+ */
+const PUSH_COPY = {
+  unsupported: ['This browser cannot receive push notifications.', 'The dashboard still shows every cutoff, with a warning as each one gets close.'],
+  'needs-install': ['On iPhone and iPad, reminders need the app on your Home Screen.', 'In Safari: Share → Add to Home Screen, then open Finances from there and turn reminders on.'],
+  'no-worker': ['Reminders need the installed app or the live site.', 'The service worker that receives them is not running on this page (the dev server skips it).'],
+  denied: ['Notifications are blocked for this site.', 'Only the browser can undo that: allow notifications in its site settings, then come back here.'],
+};
+
+async function paintPush(){
+  const el = document.getElementById('pushBody');
+  if (!el) return;
+  let state;
+  try { state = await pushState(); } catch { state = 'unsupported'; }
+  if (!document.body.contains(el)) return;
+
+  const cards = upcomingCutoffs(getAccounts(), crDay(new Date())).length;
+  const scope = cards
+    ? `<div class="card-note" style="margin-top:12px">${cards} card${cards === 1 ? ' has' : 's have'} a cutoff set.</div>`
+    : `<div class="card-note" style="margin-top:12px">No card has a cutoff set yet, so there is nothing to remind you of.
+        <button class="linkbtn" onclick="setView('accounts')">Set one on Accounts</button>.</div>`;
+
+  if (state === 'on') {
+    el.innerHTML = `<div class="set-row">
+        <div class="set-text"><b>${icon('check-circle', { size: 16 })} On for this device</b><span>Other devices are switched on separately.</span></div>
+        <div class="preset-row" style="margin:0">
+          <button class="btn ghost sm" onclick="pushTest()">Send a test</button>
+          <button class="btn ghost sm" onclick="setPush(false)">Turn off</button>
+        </div>
+      </div>${scope}`;
+  } else if (state === 'off') {
+    el.innerHTML = `<div class="set-row">
+        <div class="set-text"><b>Off for this device</b><span>You will be asked to allow notifications.</span></div>
+        <button class="btn sm" onclick="setPush(true)">${icon('bell', { size: 16 })}Turn on reminders</button>
+      </div>${scope}`;
+  } else {
+    const [what, fix] = PUSH_COPY[state] ?? PUSH_COPY.unsupported;
+    el.innerHTML = `<div class="push-note">${icon('info', { size: 18 })}<div><b>${what}</b><span>${fix}</span></div></div>${scope}`;
+  }
+}
+
+export async function setPush(on){
+  const buttons = document.querySelectorAll('#pushBody button');
+  buttons.forEach((b) => { b.disabled = true; });
+  try {
+    const state = on ? await enablePush() : await disablePush();
+    if (on && state === 'on') toast('Reminders are on for this device');
+    else if (on && state === 'denied') toast('Notifications were blocked — see below for how to allow them');
+    else if (on && state === 'off') toast('Not turned on — the browser was not given permission');
+    else if (!on) toast('Reminders are off for this device');
+  } catch (err) {
+    console.error('[push]', err);
+    toast(`Could not ${on ? 'turn on' : 'turn off'} reminders: ${err.message}`);
+  }
+  paintPush();
+}
+
+export async function pushTest(){
+  try { await testNotification(); }
+  catch (err) { toast(`Could not show a test: ${err.message}`); }
 }
 function allocSlider(k,label,val){
   const col = { needs:'var(--cat-needs)', wants:'var(--cat-wants)', savings:'var(--cat-savings)' }[k];

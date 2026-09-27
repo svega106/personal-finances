@@ -151,8 +151,23 @@ function accountForm(a) {
              these four digits and nothing else, so an account without them can
              never be matched to anything.`
           : `A debit card is not an account of its own — it spends from this one,
-             so its charges come straight off this balance.`}
+             so its charges come straight off this balance. It has no bill, so
+             no cutoff.`}
       </div></div>
+
+    ${isCard ? `
+    <div class="tx-2col">
+      <div class="field"><label for="acc_cutoff">Billing cutoff <span class="faint">(day of month)</span></label>
+        <input class="inp" id="acc_cutoff" type="number" inputmode="numeric" min="1" max="31"
+               value="${a?.cutoffDay ?? ''}" placeholder="e.g. 15"></div>
+      <div class="field"><label for="acc_warn">Remind me <span class="faint">(days before)</span></label>
+        <input class="inp" id="acc_warn" type="number" inputmode="numeric" min="0" max="31"
+               value="${a?.cutoffWarnDays ?? 3}"></div>
+    </div>
+    <p class="field-hint" style="margin:-6px 0 14px">
+      The same every month; a day the month does not have means its last day.
+      Applies to the whole card — ${sibling(a) ? `${esc(sibling(a).label)} is updated with it` : 'both its balances'}.
+    </p>` : ''}
 
     <div class="actions">
       ${isNew ? '<span></span>'
@@ -160,6 +175,13 @@ function accountForm(a) {
       <button class="btn ghost" onclick="closeModal()">Cancel</button>
       <button class="btn" id="acc_save">${isNew ? 'Add' : 'Save'}</button>
     </div>`;
+}
+
+/** The other currency half of a credit card: same bank, same four digits. */
+function sibling(a) {
+  if (!a || a.type !== 'card' || !a.issuer || !a.last4) return null;
+  return getAccounts().find((x) => x.id !== a.id && x.type === 'card'
+    && x.issuer === a.issuer && x.last4 === a.last4) || null;
 }
 
 export function acctAdd() {
@@ -182,6 +204,8 @@ function wireAccountForm(existing) {
     if (document.getElementById('acc_currency')) fields.currency = val('acc_currency');
     if (document.getElementById('acc_issuer')) fields.issuer = val('acc_issuer');
     if (document.getElementById('acc_last4')) fields.last4 = val('acc_last4');
+    if (document.getElementById('acc_cutoff')) fields.cutoffDay = val('acc_cutoff');
+    if (document.getElementById('acc_warn')) fields.cutoffWarnDays = val('acc_warn');
 
     const { row, error } = accountPatch(existing, fields);
     if (error) { toast(error); return; }
@@ -194,6 +218,19 @@ function wireAccountForm(existing) {
     btn.disabled = true; btn.textContent = 'Saving…';
     try {
       await getRepo().upsertAccount(row);
+      // The cutoff is the card's, not one currency's: the other half gets the
+      // same one, so the reminder and the dashboard never disagree with it.
+      const twin = existing && sibling(existing);
+      const twinDiffers = twin && ((twin.cutoffDay ?? null) !== row.cutoffDay
+        || (twin.cutoffWarnDays ?? 3) !== row.cutoffWarnDays);
+      if (twinDiffers) {
+        const { row: twinRow, error: twinErr } = accountPatch(twin, {
+          label: twin.label, institution: twin.institution ?? '',
+          cutoffDay: row.cutoffDay ?? '', cutoffWarnDays: row.cutoffWarnDays,
+        });
+        if (twinErr) throw new Error(twinErr);
+        await getRepo().upsertAccount(twinRow);
+      }
       await refreshAccounts();
       closeModal();
       toast(existing ? `${row.label} saved` : `${row.label} added`);

@@ -13,6 +13,7 @@ import { crDay, crMonth, crNoon } from './cr-date.js';
 import { afterLedgerChange } from './refresh.js';
 import { txFilters } from './views-tx.js';
 import { icon } from './icons.js';
+import { openTransfer, openIncome } from './money-actions.js';
 
 let editing = null;
 
@@ -36,6 +37,11 @@ export function txEdit(id) {
   // copy, or an unknown id opens an empty sheet instead of saying so.
   const row = id ? findRow(id) : null;
   if (id && !row) { toast('Transaction not found'); return; }
+  // A transfer or an income has its own sheet. This one offers a category and
+  // a budget line, which a transfer may not carry (tx_transfer_cat_ck) and an
+  // income has no use for.
+  if (row?.kind === 'transfer') { openTransfer(id); return; }
+  if (row?.kind === 'income') { openIncome(id); return; }
   editing = row ? { ...row } : blankTx(monthKey);
   openModal(sheet(editing));
   wireSheet();

@@ -39,6 +39,16 @@ function displayName(t) {
 function accountChip(t) {
   const a = accountById(t.accountId);
   if (!a) return '';
+  // A transfer names both ends, so it reads the same under either account.
+  if (t.kind === 'transfer') {
+    const to = accountById(t.counterpartyAccountId);
+    return `<span class="tx-acct">${accountIcon(a, { size: 'xs', viaCard: false })}${esc(a.label)}`
+      + ` <span aria-label="to">→</span> ${to ? `${accountIcon(to, { size: 'xs' })}${esc(to.label)}` : '?'}</span>`;
+  }
+  // Money in lands in the account, not on its debit card: no card, no digits.
+  if (t.kind === 'income') {
+    return `<span class="tx-acct">${accountIcon(a, { size: 'xs', viaCard: false })}${esc(a.label)}</span>`;
+  }
   const tail = a.last4 ? `<span class="tail">••${esc(a.last4)}</span>` : '';
   return `<span class="tx-acct">${accountIcon(a, { size: 'xs' })}${esc(a.label)}${tail}</span>`;
 }
@@ -116,14 +126,7 @@ export function renderTransactions(views, monthKey) {
 function shell(rows, monthKey) {
   if (rows === null) return skeleton();
 
-  const visible = rows.filter((t) => {
-    if (filters.account !== 'all' && t.accountId !== filters.account) return false;
-    if (filters.cat !== 'all') {
-      if (filters.cat === 'none' ? !!t.cat : t.cat !== filters.cat) return false;
-    }
-    if (filters.unreviewedOnly && t.reviewed) return false;
-    return true;
-  });
+  const visible = visibleRows(rows, filters);
 
   const totals = spendTotals(rows);
   const needsReview = unreviewedCount(rows);
@@ -134,6 +137,28 @@ function shell(rows, monthKey) {
     ${toolbar(needsReview, rows)}
     ${visible.length ? groupByDay(visible) : empty(rows.length)}
   `;
+}
+
+/**
+ * The rows the filters leave.
+ *
+ * An account's history includes transfers that arrived in it, not only those
+ * that left: a card payment is `account_id` savings, `counterparty_account_id`
+ * the card, and filtering to the card must still find it.
+ *
+ * A category filter never matches a transfer or income — neither carries a
+ * category — so they show under "All" and under their accounts.
+ */
+export function visibleRows(rows, f) {
+  return rows.filter((t) => {
+    if (f.account !== 'all' && t.accountId !== f.account && t.counterpartyAccountId !== f.account) return false;
+    if (f.cat !== 'all') {
+      if (t.kind === 'transfer' || t.kind === 'income') return false;
+      if (f.cat === 'none' ? !!t.cat : t.cat !== f.cat) return false;
+    }
+    if (f.unreviewedOnly && t.reviewed) return false;
+    return true;
+  });
 }
 
 /** Placeholders in the shape of what is coming, while the month loads. */

@@ -18,6 +18,8 @@
  *        INGEST_SECRET  the same value set as a Supabase secret
  *   3. Run `setUp` once and approve the Gmail permission prompt
  *   4. Triggers -> add trigger -> syncNow, time-driven, every 15 minutes
+ *   5. Triggers -> add trigger -> sendReminders, time-driven, day timer,
+ *      7am to 8am — push reminders ahead of each card's billing cutoff
  *
  * Run by hand from the editor's Run menu when needed:
  *   resyncLast30Days      re-offer a month of mail, e.g. after fixing a parser
@@ -53,6 +55,42 @@ function setUp() {
 
 function syncNow() {
   run_('import', null, true);
+}
+
+/**
+ * Ask the server to send any cutoff reminders that are due. Once a day.
+ *
+ * This only knocks: which cards, which day, and whether a reminder already
+ * went out are all decided server-side, so running it twice, or by hand, sends
+ * nothing twice. The address is the ingest one with the function name
+ * swapped, so there is no second property to keep in step.
+ */
+function sendReminders() {
+  var ingest = PROPS.getProperty('INGEST_URL');
+  var secret = PROPS.getProperty('INGEST_SECRET');
+  if (!ingest || !secret) throw new Error('Set INGEST_URL and INGEST_SECRET in Script properties.');
+  if (ingest.indexOf('/functions/v1/ingest-email') === -1) {
+    throw new Error('INGEST_URL should end in /functions/v1/ingest-email, got: ' + ingest);
+  }
+  var url = ingest.replace('/functions/v1/ingest-email', '/functions/v1/send-cutoff-reminders');
+
+  var res = UrlFetchApp.fetch(url, {
+    method: 'post',
+    contentType: 'application/json',
+    headers: { 'x-ingest-secret': secret },
+    payload: '{}',
+    muteHttpExceptions: true
+  });
+  var code = res.getResponseCode();
+  var text = res.getContentText();
+  if (code !== 200) throw new Error('Reminders failed (' + code + '): ' + text.slice(0, 500));
+
+  var r = JSON.parse(text);
+  var summary = r.today + ': ' + r.due + ' due, sent ' + (r.sent.length ? r.sent.join(', ') : 'none');
+  if (r.noDevice.length) summary += '\n  no device subscribed for: ' + r.noDevice.join(', ');
+  if (r.failed.length) summary += '\n*** failed: ' + JSON.stringify(r.failed);
+  if (r.removedDevices) summary += '\n  removed ' + r.removedDevices + ' device(s) that no longer exist';
+  Logger.log(summary);
 }
 
 /**

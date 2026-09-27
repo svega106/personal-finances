@@ -207,6 +207,82 @@ edited — the write ignores rows whose `ext_id` is already present.
 To re-import after fixing a parser, run `resyncLast7Days` in the script.
 
 
+## Paying a card, income, and cutoff reminders
+
+**Transfer to card** pays a credit card from savings. It is one transaction
+row with both ends on it — `account_id` the savings account it left,
+`counterparty_account_id` the card it paid — which is what `account_balances`
+has always expected of a transfer: it comes off the savings balance and off
+what the card owes. A second row for the other side would count it twice. A
+transfer may not take savings below zero, and needs that account's balance
+recorded to know. The debit card on `Ahorros ₡` is recorded on the savings
+row, so it is a source, never a destination.
+
+**Add income** puts money into a savings account as `kind = 'income'`. Neither
+kind is spending: both are left out of every spending total, show in Activity
+with their own label, and appear under each account they touch.
+
+**Cutoffs** are set per credit card — Accounts, tap one of the card's
+balances: the day of the month the statement closes, and how many days before
+to be reminded. Both currency halves of a card share them. The dashboard lists
+every cutoff, soonest first, marked once inside its card's window.
+
+Reminders are Web Push to each device switched on in Settings. Which cards are
+due, and whether a reminder already went out, is decided in
+`supabase/functions/_shared/cutoff.js` and `reminders.js` — the same module
+the dashboard uses, under node tests. A reminder is recorded before it is
+sent, so the daily job never sends one twice, catches up if it missed a day,
+and retries if nothing was delivered. Email would be another delivery in the
+same loop; there is no mail provider in this project yet.
+
+```
+Apps Script (daily) ──▶ POST /functions/v1/send-cutoff-reminders ──▶ web push ──▶ sw.js
+```
+
+### Setting it up
+
+In this order — the app reads the new columns, so it breaks if deployed first.
+
+1. **Migrate.** SQL Editor → paste `supabase/migrations/0010_cutoffs_and_reminders.sql`
+   → Run. Safe to run twice.
+
+2. **Secrets.** `supabase/.env.local` (git-ignored) holds the VAPID key pair
+   the app subscribes with — its public half is also in
+   `app/src/push-config.js`. Replace `REPLACE-WITH-YOUR-EMAIL` in
+   `VAPID_SUBJECT` with a `mailto:` address or the app's `https:` URL (the
+   push services' contact for whoever sends), then:
+
+   ```
+   npx supabase secrets set --env-file supabase/.env.local
+   ```
+
+   The function also uses `INGEST_SECRET`, which is already set.
+
+3. **Deploy the function.**
+
+   ```
+   npx supabase functions deploy send-cutoff-reminders --no-verify-jwt
+   ```
+
+4. **Apps Script.** Paste the new `sync/apps-script/Code.gs` over the old one,
+   save, then Triggers → Add Trigger: function `sendReminders`, Time-driven,
+   Day timer, 7am to 8am. Run it once by hand: the log says what was due and
+   sent.
+
+5. **Deploy the app** (push to `main`), then on each device: Settings →
+   Cutoff reminders → Turn on. On iPhone and iPad this works only in the app
+   added to the Home Screen, not in a Safari tab — the switch says so.
+
+To try a reminder without waiting for a cutoff, post a day to the function:
+
+```
+curl -X POST https://zemxydjuuugzumxjrpqf.supabase.co/functions/v1/send-cutoff-reminders \
+  -H "x-ingest-secret: <INGEST_SECRET>" -d '{"today":"2026-10-13"}'
+```
+
+That records the reminder as sent, like a real run would.
+
+
 ## Installing it on a phone
 
 The app is a PWA, so it installs to a home screen and opens without browser

@@ -103,6 +103,45 @@ self.addEventListener('fetch', (event) => {
   }
 });
 
+/* ------------------------------------------------------------ reminders */
+
+/**
+ * A reminder from send-cutoff-reminders. The payload is JSON: title, body,
+ * tag, url. The tag is per card per billing cycle, so a second copy replaces
+ * the first rather than stacking.
+ *
+ * Something is always shown: a push that displays nothing is treated by the
+ * browser as abuse, and it may stop delivering to this app.
+ */
+self.addEventListener('push', (event) => {
+  let data = {};
+  try { data = event.data ? event.data.json() : {}; } catch { data = { body: event.data?.text() }; }
+  event.waitUntil(self.registration.showNotification(data.title || 'Finances', {
+    body: data.body || '',
+    icon: '/icons/icon-192.png',
+    badge: '/icons/icon-192.png',
+    tag: data.tag,
+    data: { url: data.url || '/' },
+  }));
+});
+
+/** Opening a reminder brings the app forward, on the page it points at. */
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const url = new URL(event.notification.data?.url || '/', self.location.origin).href;
+  event.waitUntil((async () => {
+    const open = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    const here = open.find((c) => new URL(c.url).origin === self.location.origin);
+    if (here) {
+      await here.focus();
+      // navigate() refuses a window this worker does not control; focused
+      // on whatever it was showing is still the app, brought forward.
+      return here.navigate(url).catch(() => undefined);
+    }
+    return self.clients.openWindow(url);
+  })());
+});
+
 /** Lets the page tell a waiting worker to take over immediately. */
 self.addEventListener('message', (event) => {
   if (event.data === 'skip-waiting') self.skipWaiting();

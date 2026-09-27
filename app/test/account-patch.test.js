@@ -106,3 +106,47 @@ test('digits are taken from however they were typed', () => {
   const { row } = accountPatch(CARD, { label: 'x', issuer: 'bac', last4: '··4477' });
   assert.equal(row.last4, '4477');
 });
+
+/* ------------------------------------------------------------ cutoffs */
+
+test('a card takes a cutoff day and its own warning days', () => {
+  const { row, error } = accountPatch(CARD, { label: CARD.label, cutoffDay: '15', cutoffWarnDays: '5' });
+  assert.equal(error, undefined);
+  assert.equal(row.cutoffDay, 15);
+  assert.equal(row.cutoffWarnDays, 5);
+});
+
+test('a cutoff the form did not offer is kept, like the card number', () => {
+  const withCutoff = { ...CARD, cutoffDay: 15, cutoffWarnDays: 5 };
+  const { row } = accountPatch(withCutoff, { label: 'Renamed' });
+  assert.equal(row.cutoffDay, 15);
+  assert.equal(row.cutoffWarnDays, 5);
+});
+
+test('clearing the cutoff day removes it; clearing the warning restores 3', () => {
+  const withCutoff = { ...CARD, cutoffDay: 15, cutoffWarnDays: 5 };
+  const { row } = accountPatch(withCutoff, { label: CARD.label, cutoffDay: '', cutoffWarnDays: '' });
+  assert.equal(row.cutoffDay, null);
+  assert.equal(row.cutoffWarnDays, 3);
+});
+
+test('a cutoff outside 1–31, or a warning outside 0–31, is refused', () => {
+  for (const cutoffDay of ['0', '32', '15.5', 'x']) {
+    assert.match(accountPatch(CARD, { label: 'x', cutoffDay }).error, /1 to 31/, cutoffDay);
+  }
+  for (const cutoffWarnDays of ['-1', '32', '2.5']) {
+    assert.match(accountPatch(CARD, { label: 'x', cutoffWarnDays }).error, /0 and 31/, cutoffWarnDays);
+  }
+  assert.equal(accountPatch(CARD, { label: 'x', cutoffWarnDays: '0' }).row.cutoffWarnDays, 0);
+});
+
+test('the debit card on a savings account never gets a cutoff', () => {
+  // Ahorros ₡ carries BAC Mastercard 2207, a debit card: no bill, no cutoff.
+  const { row } = accountPatch(SAVINGS, { label: SAVINGS.label, cutoffDay: '20' });
+  assert.equal(row.cutoffDay, null);
+});
+
+test('saving an account keeps its place in the list', () => {
+  const { row } = accountPatch({ ...CARD, sortOrder: 10 }, { label: 'Renamed' });
+  assert.equal(row.sortOrder, 10);
+});

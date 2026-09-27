@@ -16,7 +16,8 @@ import { rateFor, accountById } from './tx.js';
 import { esc, dayKey, dayLabel } from './views-tx.js';
 import { workFor, splitWork, totalByCurrency, isReimbursed, isCompanyPaid } from './work.js';
 import { icon, accountIcon, cardThumb, merchantIcon, bankOf, networkMark, cardArt } from './icons.js';
-import { crShortDate } from './cr-date.js';
+import { crDay, crShortDate } from './cr-date.js';
+import { upcomingCutoffs } from '../../supabase/functions/_shared/cutoff.js';
 
 /**
  * Lets the actions module force a repaint once a settle has landed. Declared
@@ -233,7 +234,10 @@ function savingsSection(list, monthKey) {
   <section class="section">
     <div class="section-head">
       <h3>Savings & cash</h3>
-      <button class="btn ghost sm" onclick="acctAdd()">${icon('plus')}Add account</button>
+      <div class="section-actions">
+        <button class="btn soft sm" onclick="openIncome()">${icon('income')}Add income</button>
+        <button class="btn ghost sm" onclick="acctAdd()">${icon('plus')}Add account</button>
+      </div>
     </div>
     <p class="section-note lead">Yours to keep current: a transfer or a deposit sends no email, so the
       app only knows what you tell it. Tap an account to record what it holds.</p>
@@ -250,6 +254,19 @@ function savingsSection(list, monthKey) {
       bank's own.
     </p>
   </section>`;
+}
+
+/**
+ * When the card's statement closes next — from the same module the dashboard
+ * and the reminder job use — and a warning once inside the card's own window.
+ */
+function cutoffLine(group) {
+  const [c] = upcomingCutoffs(group.map(({ a }) => a).filter(Boolean), crDay(new Date()));
+  if (!c) return '';
+  const when = c.daysLeft === 0 ? 'closes today'
+    : c.daysLeft === 1 ? 'closes tomorrow' : `closes in ${c.daysLeft} days`;
+  return `<div class="pcard-cutoff${c.warning ? ' warn' : ''}">${icon(c.warning ? 'alert' : 'calendar')}`
+    + `Statement ${when} · ${esc(crShortDate(c.cutoffDate))}</div>`;
 }
 
 /** "BAC VISA ₡" and "BAC VISA $" are one card with two balances. */
@@ -290,6 +307,7 @@ function walletCard(group, monthKey) {
       ${networkMark(a.brand) || (bank ? `<span class="nw nw-mono">${bank.mono}</span>` : '')}
     </div>
     <div class="pcard-bals">${group.map(balance).join('')}</div>
+    ${cutoffLine(group)}
     <div class="pcard-foot">
       <span class="pcard-num">•••• ${esc(a.last4 || '')}</span>
       ${work ? `<span class="pcard-tag">${icon('briefcase')}Company card</span>` : ''}
@@ -310,7 +328,10 @@ function cardsSection(list, monthKey) {
   }
   return `
   <section class="section">
-    <div class="section-head"><h3>Cards</h3></div>
+    <div class="section-head">
+      <h3>Cards</h3>
+      <button class="btn soft sm" onclick="openTransfer()">${icon('transfer')}Transfer to card</button>
+    </div>
     <p class="section-note lead">Worked out from your transactions, so they move on their own. Each card
       settles its colón and dollar balances separately — tap one to edit it.</p>
     <div class="wallet">${[...groups.values()].map((g) => walletCard(g, monthKey)).join('')}</div>

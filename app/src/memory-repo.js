@@ -165,6 +165,15 @@ export function createMemoryRepo(seed = {}) {
       if (at >= 0) store.accounts.splice(at, 1); // listAccounts returns active only
     },
 
+    async savePushSubscription(sub) {
+      store.push = (store.push ?? []).filter((s) => s.endpoint !== sub.endpoint);
+      store.push.push(structuredClone(sub));
+    },
+
+    async deletePushSubscription(endpoint) {
+      store.push = (store.push ?? []).filter((s) => s.endpoint !== endpoint);
+    },
+
     /** Test helper: what the repo currently holds. */
     _dump() {
       return structuredClone(store);

@@ -1,0 +1,194 @@
+/**
+ * Transfers to a card, and income into savings: who can send and receive,
+ * what stops a bad one, the row that is written, and — through the in-memory
+ * repository, which mirrors the `account_balances` view — what it does to
+ * both balances.
+ */
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { createMemoryRepo } from '../src/memory-repo.js';
+import {
+  transferSources, transferDestinations, incomeAccounts,
+  validateTransfer, validateIncome, transferRow, incomeRow,
+} from '../src/money-moves.js';
+import { visibleRows } from '../src/views-tx.js';
+
+const AHORROS = { id: 's-crc', label: 'Ahorros ₡', type: 'savings', currency: 'CRC', scope: 'personal',
+  issuer: 'bac', brand: 'mastercard', last4: '2207' }; // the debit card lives here
+const AHORROS_USD = { id: 's-usd', label: 'Ahorros USD', type: 'savings', currency: 'USD', scope: 'personal' };
+const VISA = { id: 'c-visa', label: 'BAC VISA ₡', type: 'card', currency: 'CRC', scope: 'personal',
+  issuer: 'bac', last4: '4477' };
+const BNCR = { id: 'c-bncr', label: 'BNCR VISA ₡ (work)', type: 'card', currency: 'CRC', scope: 'work',
+  issuer: 'bncr', last4: '0828' };
+const CASH = { id: 'cash', label: 'Efectivo', type: 'cash', currency: 'CRC', scope: 'personal' };
+const ALL = [AHORROS, AHORROS_USD, VISA, BNCR, CASH];
+
+/* ------------------------------------------------------- who takes part */
+
+test('transfers come from savings, and only savings', () => {
+  assert.deepEqual(transferSources(ALL).map((a) => a.id), ['s-crc', 's-usd']);
+});
+
+test('they go to a personal credit card — not the debit card, not the company card', () => {
+  // The debit card is on the Ahorros ₡ row, a savings account, so it is
+  // never a destination; the work card is paid by the company.
+  assert.deepEqual(transferDestinations(ALL).map((a) => a.id), ['c-visa']);
+});
+
+test('income lands in savings', () => {
+  assert.deepEqual(incomeAccounts(ALL).map((a) => a.id), ['s-crc', 's-usd']);
+});
+
+/* ------------------------------------------------------------ validation */
+
+const funded = { accountId: 's-crc', currentBalance: 100000, hasSnapshot: true };
+const ok = { source: AHORROS, dest: VISA, amount: 30000, date: '2026-09-10', balance: funded };
+
+test('a transfer within the balance is fine', () => {
+  assert.equal(validateTransfer(ok), null);
+  assert.equal(validateTransfer({ ...ok, amount: 100000 }), null, 'exactly everything is allowed');
+});
+
+test('a transfer may not take savings below zero', () => {
+  const err = validateTransfer({ ...ok, amount: 100000.01 });
+  assert.match(err, /below zero/);
+  assert.match(err, /₡100,000 is available/);
+});
+
+test('the amount must be more than zero', () => {
+  for (const amount of [0, -5, NaN, Infinity]) {
+    assert.match(validateTransfer({ ...ok, amount }), /more than zero/, String(amount));
+    assert.match(validateIncome({ account: AHORROS, amount, date: '2026-09-10' }), /more than zero/);
+  }
+});
+
+test('the source must be savings and the destination a credit card', () => {
+  assert.match(validateTransfer({ ...ok, source: CASH }), /from a savings account/);
+  assert.match(validateTransfer({ ...ok, dest: AHORROS }), /Only a credit card/);
+  assert.match(validateTransfer({ ...ok, source: null }), /comes from/);
+  assert.match(validateTransfer({ ...ok, dest: null }), /Choose the card/);
+});
+
+test('with no recorded balance, a transfer is refused rather than guessed at', () => {
+  const unknown = { accountId: 's-crc', currentBalance: 0, hasSnapshot: false };
+  assert.match(validateTransfer({ ...ok, balance: unknown }), /Record what Ahorros ₡ holds first/);
+});
+
+test('editing a transfer counts its own amount as available again', () => {
+  // 30,000 already left: 70,000 remains. Raising the same transfer to 90,000
+  // needs 60,000 more, which is there.
+  const original = { kind: 'transfer', accountId: 's-crc', currency: 'CRC', amount: 30000 };
+  const after = { ...funded, currentBalance: 70000 };
+  assert.equal(validateTransfer({ ...ok, amount: 90000, balance: after, original }), null);
+  assert.match(validateTransfer({ ...ok, amount: 100001, balance: after, original }), /below zero/);
+  // Moved to a different source, the original gives nothing back to it.
+  assert.match(
+    validateTransfer({ ...ok, amount: 90000, balance: after, original: { ...original, accountId: 's-usd' } }),
+    /below zero/);
+});
+
+test('income needs a savings account and a date', () => {
+  assert.equal(validateIncome({ account: AHORROS, amount: 925000, date: '2026-09-15' }), null);
+  assert.match(validateIncome({ account: VISA, amount: 1, date: '2026-09-15' }), /savings account/);
+  assert.match(validateIncome({ account: AHORROS, amount: 1, date: '' }), /date/);
+});
+
+/* ------------------------------------------------------------- the rows */
+
+test('a transfer is one row that names both ends', () => {
+  const t = transferRow({ source: AHORROS, dest: VISA, amount: 30000, date: '2026-09-10', note: ' September ' });
+  assert.equal(t.kind, 'transfer');
+  assert.equal(t.accountId, 's-crc');
+  assert.equal(t.counterpartyAccountId, 'c-visa');
+  assert.equal(t.cat, null, 'a transfer carries no category (tx_transfer_cat_ck)');
+  assert.equal(t.budgetLineId, null);
+  assert.equal(t.method, 'transfer');
+  assert.equal(t.currency, 'CRC');
+  assert.equal(t.amountCrc, 30000);
+  assert.equal(t.merchant, 'To BAC VISA ₡');
+  assert.equal(t.note, 'September');
+  assert.equal(t.reviewed, true);
+  assert.match(t.extId, /^manual:/);
+});
+
+test('income is its own kind, with no counterparty', () => {
+  const t = incomeRow({ account: AHORROS, amount: 925000, date: '2026-09-15', from: 'Paycheck' });
+  assert.equal(t.kind, 'income');
+  assert.equal(t.accountId, 's-crc');
+  assert.equal(t.counterpartyAccountId, null);
+  assert.equal(t.merchant, 'Paycheck');
+  assert.equal(t.cat, null);
+  assert.equal(incomeRow({ account: AHORROS, amount: 1, date: '2026-09-15' }).merchant, 'Income');
+});
+
+test('a dollar source makes a dollar transfer, not converted on the day', () => {
+  const t = transferRow({ source: AHORROS_USD, dest: VISA, amount: 50, date: '2026-09-10' });
+  assert.equal(t.currency, 'USD');
+  assert.equal(t.amountCrc, null);
+});
+
+test('editing keeps the id and the recorded time when the day is unchanged', () => {
+  const existing = { id: 't9', extId: 'manual:x', source: 'manual', postedAt: '2026-09-10T21:15:00-06:00' };
+  const same = transferRow({ source: AHORROS, dest: VISA, amount: 1, date: '2026-09-10', existing });
+  assert.equal(same.id, 't9');
+  assert.equal(same.extId, 'manual:x');
+  assert.equal(same.postedAt, existing.postedAt);
+  const moved = transferRow({ source: AHORROS, dest: VISA, amount: 1, date: '2026-09-11', existing });
+  assert.notEqual(moved.postedAt, existing.postedAt);
+});
+
+/* --------------------------------------------------- what the balances do */
+
+test('a transfer takes from savings and pays down the card; income adds to savings', async () => {
+  const repo = createMemoryRepo({
+    accounts: [AHORROS, VISA],
+    snapshots: [{ id: 'sn', accountId: 's-crc', asOf: '2026-09-01', balance: 100000, currency: 'CRC' }],
+    transactions: [{
+      id: 'x', extId: 'e1', kind: 'expense', postedAt: '2026-09-05T12:00:00-06:00', amount: 50000,
+      currency: 'CRC', accountId: 'c-visa', scope: 'personal', status: 'settled',
+    }],
+  });
+  const balances = async () => Object.fromEntries(
+    (await repo.listAccountBalances()).map((b) => [b.accountId, b.currentBalance]));
+
+  assert.deepEqual(await balances(), { 's-crc': 100000, 'c-visa': -50000 });
+
+  await repo.upsertTransaction(transferRow({ source: AHORROS, dest: VISA, amount: 30000, date: '2026-09-10' }));
+  assert.deepEqual(await balances(), { 's-crc': 70000, 'c-visa': -20000 },
+    'savings down 30,000; owed on the card down 30,000');
+
+  await repo.upsertTransaction(incomeRow({ account: AHORROS, amount: 25000, date: '2026-09-12', from: 'Paycheck' }));
+  assert.deepEqual(await balances(), { 's-crc': 95000, 'c-visa': -20000 }, 'income touches savings only');
+});
+
+test('neither a transfer nor income is spending', async () => {
+  const { spendTotals } = await import('../src/tx.js');
+  const expense = {
+    kind: 'expense', amount: 12000, currency: 'CRC', accountId: 'c-visa', scope: 'personal',
+    cat: 'wants', status: 'settled', postedAt: '2026-09-05T12:00:00-06:00',
+  };
+  const alone = spendTotals([expense]);
+  const withMoves = spendTotals([
+    expense,
+    transferRow({ source: AHORROS, dest: VISA, amount: 30000, date: '2026-09-10' }),
+    incomeRow({ account: AHORROS, amount: 925000, date: '2026-09-15' }),
+  ]);
+  assert.equal(withMoves.total, alone.total);
+  assert.equal(withMoves.uncategorized, 0, 'no category is not "uncategorized spending" here');
+});
+
+/* ------------------------------------------------- in each account's list */
+
+test('a transfer appears under both accounts, and under no spending category', () => {
+  const rows = [
+    transferRow({ source: AHORROS, dest: VISA, amount: 1, date: '2026-09-10' }),
+    incomeRow({ account: AHORROS, amount: 1, date: '2026-09-10' }),
+    { kind: 'expense', accountId: 'c-visa', cat: null, reviewed: true },
+  ];
+  const f = (x) => ({ account: 'all', cat: 'all', unreviewedOnly: false, ...x });
+  const kinds = (x) => visibleRows(rows, f(x)).map((t) => t.kind);
+
+  assert.deepEqual(kinds({ account: 's-crc' }), ['transfer', 'income']);
+  assert.deepEqual(kinds({ account: 'c-visa' }), ['transfer', 'expense'], 'found from the side it arrived on');
+  assert.deepEqual(kinds({ cat: 'none' }), ['expense'], 'not "uncategorized" spending');
+});

@@ -41,6 +41,28 @@ export function accountPatch(existing, fields) {
     return { error: 'A card account needs its bank and last 4 digits' };
   }
 
+  // A billing cutoff: the day of the month the statement closes, and how many
+  // days before it to be reminded. Same rule as above — absent is unchanged.
+  let cutoffDay = existing?.cutoffDay ?? null;
+  let cutoffWarnDays = existing?.cutoffWarnDays ?? 3;
+  if (has('cutoffDay')) {
+    const raw = String(fields.cutoffDay ?? '').trim();
+    cutoffDay = raw === '' ? null : Number(raw);
+    if (cutoffDay !== null && !(Number.isInteger(cutoffDay) && cutoffDay >= 1 && cutoffDay <= 31)) {
+      return { error: 'The cutoff is a day of the month, 1 to 31' };
+    }
+  }
+  if (has('cutoffWarnDays')) {
+    const raw = String(fields.cutoffWarnDays ?? '').trim();
+    cutoffWarnDays = raw === '' ? 3 : Number(raw);
+    if (!(Number.isInteger(cutoffWarnDays) && cutoffWarnDays >= 0 && cutoffWarnDays <= 31)) {
+      return { error: 'Remind between 0 and 31 days before the cutoff' };
+    }
+  }
+  // Only a credit card has a bill. A savings account — even the one with a
+  // debit card on it — never has a cutoff; the database refuses one too.
+  if (type !== 'card') cutoffDay = null;
+
   return {
     row: {
       id: existing?.id,
@@ -54,6 +76,11 @@ export function accountPatch(existing, fields) {
       issuer: issuer || null,
       brand: issuer ? (existing?.brand || null) : null,
       last4: last4 || null,
+      cutoffDay,
+      cutoffWarnDays,
+      // Carried through, or saving an account moved it to the end of every
+      // list: the repository writes a default when this is missing.
+      sortOrder: existing?.sortOrder,
     },
   };
 }

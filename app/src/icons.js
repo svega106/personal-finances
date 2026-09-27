@@ -49,6 +49,7 @@ const P = {
   // status & meaning
   alert: '<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
   info: '<circle cx="12" cy="12" r="9"/><path d="M12 16v-4"/><path d="M12 8h.01"/>',
+  bell: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>',
   'check-circle': '<circle cx="12" cy="12" r="9"/><path d="m8.5 12 2.5 2.5 4.5-5"/>',
   sparkles: '<path d="M11 3.5 12.6 8 17 9.6 12.6 11.2 11 15.7 9.4 11.2 5 9.6 9.4 8Z"/><path d="M18.5 14.5v5M16 17h5"/>',
   bulb: '<path d="M9 18h6"/><path d="M10 22h4"/><path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A4.65 4.65 0 0 0 18 8 6 6 0 0 0 6 8c0 1 .23 2.23 1.5 3.5A4.61 4.61 0 0 1 8.91 14"/>',
@@ -187,12 +188,17 @@ export function cardThumb(a, { size = 'md' } = {}) {
  *   investment  — a rising line
  *   cash        — a banknote
  */
-export function accountIcon(a, { size = 'md' } = {}) {
+export function accountIcon(a, { size = 'md', viaCard = true } = {}) {
   if (!a) return `<span class="ai ai-${size} ai-none" aria-hidden="true">${icon('wallet')}</span>`;
   if (a.type === 'card') return cardThumb(a, { size });
   // Beside a charge, an account with a debit card is shown as that card: it
-  // is what was used, and a monogram has no room at this size anyway.
-  if (size === 'xs' && a.last4 && a.issuer) return cardThumb(a, { size });
+  // is what was used, and a monogram has no room at this size anyway. Money
+  // arriving in the account, or sent from it, never went through the card —
+  // `viaCard: false` says so, and the account is drawn as itself.
+  if (size === 'xs' && a.last4 && a.issuer && viaCard) return cardThumb(a, { size });
+  if (size === 'xs' && a.type === 'savings') {
+    return `<span class="ai ai-xs ai-savings" aria-hidden="true">${icon('piggy')}</span>`;
+  }
   if (a.type === 'cash') return `<span class="ai ai-${size} ai-cash" aria-hidden="true">${icon('cash')}</span>`;
   if (a.type === 'investment') return `<span class="ai ai-${size} ai-invest" aria-hidden="true">${icon('trending-up')}</span>`;
   const bank = bankOf(a);

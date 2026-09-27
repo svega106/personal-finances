@@ -42,6 +42,10 @@ parameter.
 | `src/tx.js` | Transaction data, caching, rule matching, totals |
 | `src/views-tx.js` | The transactions view |
 | `src/tx-actions.js` | Its edit sheet and filters |
+| `src/money-moves.js` | Transfers to a card and income: who takes part, validation, the row written |
+| `src/money-actions.js` | Their sheets, and the phone's + chooser |
+| `src/push.js` | Reminder permission and subscription on this device, and every way it can fail |
+| `src/push-config.js` | The public VAPID key reminders are sent with |
 | `src/main.js` | Bootstrap, DOM wiring, `window.*` bindings |
 
 ## How saving works

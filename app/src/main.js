@@ -9,8 +9,10 @@ import {
   updIncome, updInvest, updItem, addItem, delItem, updContribution, copyMonth,
   clearMonth, goalModal, saveGoal, delGoal, addToGoal, confirmAddGoal, updAlloc,
   liveAlloc, setAlloc, exportData, importData, resetAll, closeModal, updCarryover,
-  useCarryover, gotoMonth, stepYear, setTheme, openMore, setUser,
+  useCarryover, gotoMonth, stepYear, setTheme, openMore, setUser, setPush, pushTest,
 } from './app.js';
+import { openTransfer, openIncome, moveDelete, openAddChooser } from './money-actions.js';
+import { refreshPushSubscription } from './push.js';
 import { txSetFilter, txClearFilters, txEdit, txSave, txDelete, txRateModal } from './tx-actions.js';
 import {
   acctUpdate, acctAdd, acctEdit, acctArchive, acctPickWork, acctSelectAllWork,
@@ -66,7 +68,8 @@ function wire() {
   document.getElementById('nextMonth').addEventListener('click', () => shiftCurrentMonth(1));
   document.getElementById('refreshBtn')?.addEventListener('click', doRefresh);
   document.getElementById('addBtn')?.addEventListener('click', () => txEdit());
-  document.getElementById('fab')?.addEventListener('click', () => txEdit());
+  // The phone's + offers all three ways money moves, not only an expense.
+  document.getElementById('fab')?.addEventListener('click', () => openAddChooser());
   document.getElementById('moreBtn')?.addEventListener('click', () => openMore());
 
   // Escape closes a sheet, as it would any dialog.
@@ -82,7 +85,8 @@ function wire() {
     updIncome, updInvest, updItem, addItem, delItem, updContribution, copyMonth, clearMonth,
     goalModal, saveGoal, delGoal, addToGoal, confirmAddGoal, updAlloc, liveAlloc, setAlloc,
     exportData, importData, resetAll, closeModal, updCarryover, useCarryover, gotoMonth, stepYear,
-    setTheme, openMore, doSignOut: () => signOut(),
+    setTheme, openMore, doSignOut: () => signOut(), setPush, pushTest,
+    openTransfer, openIncome, moveDelete, openAddChooser,
     txSetFilter, txClearFilters, txEdit, txSave, txDelete, txRateModal,
     acctUpdate, acctAdd, acctEdit, acctArchive, acctPickWork, acctSelectAllWork,
     acctSettleOne, acctSettleSelected, acctUnsettle,
@@ -177,6 +181,9 @@ async function boot() {
   showApp(userOf(session));
   wire();
   setView(firstView());
+
+  // A subscription the browser rotated on its own is re-sent, quietly.
+  refreshPushSubscription();
 
   // Populate the review badge without making the user open the view first.
   loadMonth(crMonth(new Date()))

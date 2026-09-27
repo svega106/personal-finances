@@ -206,13 +206,14 @@ export function extendWithTransactions(repo) {
       const uid = await userId();
       const { data, error } = await supabase
         .from('accounts')
-        .select('id, label, type, issuer, institution, brand, last4, default_currency, scope, active, sort_order')
+        .select('id, label, type, issuer, institution, brand, last4, default_currency, scope, active, sort_order, cutoff_day, cutoff_warn_days')
         .eq('user_id', uid).eq('active', true).order('sort_order');
       if (error) boom('load accounts', error);
       return (data ?? []).map((a) => ({
         id: a.id, label: a.label, type: a.type, issuer: a.issuer,
         institution: a.institution, brand: a.brand, last4: a.last4,
-        currency: a.default_currency, scope: a.scope,
+        currency: a.default_currency, scope: a.scope, sortOrder: a.sort_order,
+        cutoffDay: a.cutoff_day, cutoffWarnDays: a.cutoff_warn_days,
       }));
     },
 
@@ -384,11 +385,15 @@ export function extendWithBalances(repo) {
         issuer: a.issuer || null,
         brand: a.brand || null,
         last4: a.last4 || null,
+        // Only a credit card has a billing cutoff; the database refuses one
+        // anywhere else (accounts_cutoff_card_ck).
+        cutoff_day: a.type === 'card' ? (a.cutoffDay ?? null) : null,
+        cutoff_warn_days: a.cutoffWarnDays ?? 3,
       };
       if (a.id) row.id = a.id;
       const { data, error } = await supabase
         .from('accounts').upsert(row)
-        .select('id, label, type, issuer, institution, brand, last4, default_currency, scope, active, sort_order')
+        .select('id, label, type, issuer, institution, brand, last4, default_currency, scope, active, sort_order, cutoff_day, cutoff_warn_days')
         .single();
       if (error) {
         // The unique index is on (user_id, issuer, last4, currency). Saying so
@@ -401,7 +406,8 @@ export function extendWithBalances(repo) {
       return {
         id: data.id, label: data.label, type: data.type, issuer: data.issuer,
         institution: data.institution, brand: data.brand, last4: data.last4,
-        currency: data.default_currency, scope: data.scope,
+        currency: data.default_currency, scope: data.scope, sortOrder: data.sort_order,
+        cutoffDay: data.cutoff_day, cutoffWarnDays: data.cutoff_warn_days,
       };
     },
 
@@ -425,6 +431,29 @@ export function extendWithBalances(repo) {
       const { error } = await supabase
         .from('accounts').update({ active: false }).eq('user_id', uid).eq('id', id);
       if (error) boom('archive account', error);
+    },
+
+    /* ------------------------------------------------ push subscriptions */
+
+    /**
+     * This device, as a place to send reminders. Keyed on the endpoint, so
+     * subscribing the same browser again replaces its keys rather than
+     * adding a second copy that would be sent everything twice.
+     */
+    async savePushSubscription({ endpoint, p256dh, auth, userAgent }) {
+      const uid = await userId();
+      const { error } = await supabase
+        .from('push_subscriptions')
+        .upsert({ user_id: uid, endpoint, p256dh, auth, user_agent: userAgent ?? null },
+                { onConflict: 'endpoint' });
+      if (error) boom('save push subscription', error);
+    },
+
+    async deletePushSubscription(endpoint) {
+      const uid = await userId();
+      const { error } = await supabase
+        .from('push_subscriptions').delete().eq('user_id', uid).eq('endpoint', endpoint);
+      if (error) boom('remove push subscription', error);
     },
   });
 }
