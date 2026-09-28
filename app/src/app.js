@@ -1023,7 +1023,7 @@ function renderSettings(){
       <section class="card">
         <div class="card-head"><div><h3>Cutoff reminders</h3>
           <div class="card-sub">A notification on this device before each credit card's statement closes.
-            When, and how many days ahead, is set on each card — Accounts, then tap a card's balance.</div></div></div>
+            When, and how many days ahead, is set on each card — Accounts, then the card's Settings.</div></div></div>
         <div id="pushBody" aria-live="polite"><div class="skel skel-line" style="width:60%;height:14px"></div></div>
       </section>
       <section class="card">

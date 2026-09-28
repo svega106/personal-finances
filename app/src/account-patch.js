@@ -33,8 +33,12 @@ export function accountPatch(existing, fields) {
   if (issuer && last4.length !== 4) return { error: 'A card needs its last 4 digits' };
   if (last4 && !issuer) return { error: 'Choose which bank the card is from' };
 
-  // A card's type never changes: a card cannot become savings.
-  const type = existing?.type === 'card' ? 'card' : (fields.type || 'savings');
+  // A card's type never changes: a card cannot become savings, and an
+  // account with a history of its own cannot become a card.
+  const type = existing?.type === 'card' ? 'card' : (fields.type || existing?.type || 'savings');
+  if (existing && existing.type !== 'card' && type === 'card') {
+    return { error: 'An existing account cannot become a card — add the card instead' };
+  }
   // And a card is identified by its number. Without one, no charge can ever
   // reach it — it is not a field to be left blank.
   if (type === 'card' && !(issuer && last4)) {
@@ -72,9 +76,11 @@ export function accountPatch(existing, fields) {
       // denominated.
       currency: existing ? existing.currency : (fields.currency || 'CRC'),
       institution: String(fields.institution ?? '').trim() || null,
-      scope: existing?.scope || 'personal',
+      // Who pays a card is chosen when it is added: the company's card is
+      // kept out of personal spending and net position from then on.
+      scope: existing?.scope || (fields.scope === 'work' ? 'work' : 'personal'),
       issuer: issuer || null,
-      brand: issuer ? (existing?.brand || null) : null,
+      brand: issuer ? ((has('brand') ? fields.brand : existing?.brand) || null) : null,
       last4: last4 || null,
       cutoffDay,
       cutoffWarnDays,

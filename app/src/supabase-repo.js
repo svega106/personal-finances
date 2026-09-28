@@ -134,7 +134,7 @@ export function createSupabaseRepo() {
 
 const TX_COLS =
   'id, ext_id, kind, posted_at, merchant_raw, merchant, amount, currency, amount_crc,' +
-  ' fx_rate, account_id, counterparty_account_id, scope, reimbursement, cat,' +
+  ' fx_rate, account_id, counterparty_account_id, counterparty_amount, scope, reimbursement, cat,' +
   ' budget_line_id, source, method, status, reviewed, auth_code, reference, mcc, note';
 
 /** DB row -> the camelCase shape the app works in. */
@@ -152,6 +152,7 @@ function txFromRow(r) {
     fxRate: r.fx_rate == null ? null : Number(r.fx_rate),
     accountId: r.account_id,
     counterpartyAccountId: r.counterparty_account_id,
+    counterpartyAmount: r.counterparty_amount == null ? null : Number(r.counterparty_amount),
     scope: r.scope,
     reimbursement: r.reimbursement,
     cat: r.cat,
@@ -183,6 +184,8 @@ function txToRow(t, uid) {
     fx_rate: null,
     account_id: t.accountId ?? null,
     counterparty_account_id: t.counterpartyAccountId ?? null,
+    // Only a transfer between currencies has one (0011's check).
+    counterparty_amount: t.kind === 'transfer' && t.counterpartyAccountId ? (t.counterpartyAmount ?? null) : null,
     scope: t.scope || 'personal',
     reimbursement: t.reimbursement ?? null,
     cat: t.cat ?? null,

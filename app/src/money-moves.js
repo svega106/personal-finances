@@ -44,18 +44,31 @@ export function incomeAccounts(accounts) {
 const positive = (n) => Number.isFinite(n) && n > 0;
 
 /**
+ * A colón account paying a dollar card, or the other way round. The bank
+ * converts at its own rate that day, so what left savings and what came off
+ * the card are two figures, and both are asked for. The same currency on both
+ * ends is one figure, as it always was.
+ */
+export function crossCurrency(source, dest) {
+  return !!source && !!dest && source.currency !== dest.currency;
+}
+
+/**
  * Why a transfer cannot be saved, or null.
  *
  * `balance` is the source's row from `account_balances`. `original` is the
  * transfer being edited, if any: its amount is already out of the source's
  * balance, so it counts as available again for the edit.
  */
-export function validateTransfer({ source, dest, amount, date, balance, original }) {
+export function validateTransfer({ source, dest, amount, destAmount, date, balance, original }) {
   if (!source) return 'Choose the account the money comes from.';
   if (source.type !== 'savings') return 'A transfer to a card comes from a savings account.';
   if (!dest) return 'Choose the card it pays.';
   if (dest.type !== 'card') return 'Only a credit card can be paid with a transfer.';
   if (!positive(amount)) return 'The amount must be more than zero.';
+  if (crossCurrency(source, dest) && !positive(destAmount)) {
+    return `Enter how much came off ${dest.label}, in ${dest.currency === 'USD' ? 'dollars' : 'colones'}.`;
+  }
   if (!date) return 'Choose a date.';
 
   // Without a recorded balance there is no knowing what the account holds,
@@ -104,8 +117,14 @@ function base(existing) {
   };
 }
 
-/** The transaction for a transfer from `source` to the card `dest`. */
-export function transferRow({ source, dest, amount, date, note, existing }) {
+/**
+ * The transaction for a transfer from `source` to the card `dest`.
+ *
+ * `destAmount` is used only across currencies, and is then what came off the
+ * card in its own currency. Within one currency it is ignored, so a stale
+ * figure from a form that was switched back can never be written.
+ */
+export function transferRow({ source, dest, amount, destAmount, date, note, existing }) {
   return {
     ...base(existing),
     kind: 'transfer',
@@ -113,13 +132,14 @@ export function transferRow({ source, dest, amount, date, note, existing }) {
     merchant: `To ${dest.label}`,
     merchantRaw: `To ${dest.label}`,
     amount,
-    // In the source's currency: that is what left the account. A dollar card
-    // paid from colones is converted by the balance view at the month's rate.
+    // In the source's currency: that is what left the account.
     currency: source.currency,
     amountCrc: source.currency === 'CRC' ? amount : null,
     fxRate: null,
     accountId: source.id,
     counterpartyAccountId: dest.id,
+    // What arrived, in the card's currency; the balance view uses it as is.
+    counterpartyAmount: crossCurrency(source, dest) ? destAmount : null,
     scope: 'personal',
     cat: null,
     budgetLineId: null,
@@ -145,6 +165,7 @@ export function incomeRow({ account, amount, date, from, note, existing }) {
     fxRate: null,
     accountId: account.id,
     counterpartyAccountId: null,
+    counterpartyAmount: null,
     scope: 'personal',
     cat: null,
     budgetLineId: null,

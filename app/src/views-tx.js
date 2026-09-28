@@ -9,7 +9,7 @@ import { crDay as dayKey, crMonth, crDayLabel as dayLabel, crTimeLabel as timeLa
 import {
   loadMonth, cachedMonth, getAccounts, accountById, matchRule, findCached,
   saveTransaction, removeTransaction, spendTotals, unreviewedCount,
-  effectiveCrc, rateFor, setMonthRate,
+  effectiveCrc, rateFor, setMonthRate, isWork,
 } from './tx.js';
 import { icon, merchantIcon, accountIcon } from './icons.js';
 
@@ -72,6 +72,13 @@ function foreign(amount, currency) {
 export function amountCell(t) {
   const sign = t.kind === 'income' ? '+' : '';
   const cls = t.kind === 'income' ? 'tx-amt in' : 'tx-amt';
+  // Between currencies a transfer states both figures; neither is converted.
+  if (t.kind === 'transfer' && t.counterpartyAmount != null) {
+    const toCur = accountById(t.counterpartyAccountId)?.currency;
+    const show = (n, cur) => (cur === 'CRC' ? money(n) : foreign(n, cur));
+    return `<div class="${cls}">${show(t.amount, t.currency)}`
+      + `<span class="tx-fx">${show(t.counterpartyAmount, toCur)} off the card</span></div>`;
+  }
   if (t.currency === 'CRC') {
     return `<div class="${cls}">${sign}${money(t.amount)}</div>`;
   }
@@ -281,7 +288,7 @@ function groupByDay(rows) {
     // own, so a raw read would silently drop it from the day even after the
     // month's rate has been set.
     const dayTotal = list.reduce((s, t) => {
-      if (t.kind !== 'expense' || t.scope === 'work') return s;
+      if (t.kind !== 'expense' || isWork(t)) return s;
       return s + (effectiveCrc(t) ?? 0);
     }, 0);
     return `

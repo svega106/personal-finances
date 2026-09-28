@@ -90,14 +90,20 @@ export function createMemoryRepo(seed = {}) {
           .filter((s) => s.accountId === a.id)
           .sort((x, y) => (x.asOf < y.asOf ? 1 : -1));
         const last = snaps[0] ?? null;
+        // A transfer's arriving side may carry its own amount, in this
+        // account's currency (0011); that side then counts whatever the row's
+        // own currency is.
+        const arrived = (t) => t.kind === 'transfer' && t.counterpartyAccountId === a.id
+          && t.counterpartyAmount != null;
         const moved = store.transactions
           .filter((t) => t.status !== 'voided'
-            && t.currency === a.currency
+            && (t.currency === a.currency || arrived(t))
             && (t.accountId === a.id || t.counterpartyAccountId === a.id)
             && (!last || crDay(t.postedAt) > last.asOf))
           .reduce((sum, t) => {
             if (t.kind === 'income' || t.kind === 'adjustment') return sum + t.amount;
             if (t.kind === 'transfer') {
+              if (arrived(t)) return sum + t.counterpartyAmount;
               return t.counterpartyAccountId === a.id ? sum + t.amount : sum - t.amount;
             }
             if (t.kind === 'expense') return sum - t.amount;

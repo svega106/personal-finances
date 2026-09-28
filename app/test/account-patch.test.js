@@ -150,3 +150,34 @@ test('saving an account keeps its place in the list', () => {
   const { row } = accountPatch({ ...CARD, sortOrder: 10 }, { label: 'Renamed' });
   assert.equal(row.sortOrder, 10);
 });
+
+/* ------------------------------------------------ adding and removing cards */
+
+test('a new card keeps who pays it and its network', () => {
+  const { row } = accountPatch(null, {
+    label: 'Scotia VISA ₡', type: 'card', currency: 'CRC', issuer: 'other', last4: '9911',
+    brand: 'visa', scope: 'work', cutoffDay: '12', cutoffWarnDays: '4',
+  });
+  assert.equal(row.type, 'card');
+  assert.equal(row.scope, 'work');
+  assert.equal(row.brand, 'visa');
+  assert.equal(row.issuer, 'other');
+  assert.equal(row.cutoffDay, 12);
+  assert.equal(accountPatch(null, { label: 'x', type: 'card', issuer: 'bac', last4: '1234' }).row.scope, 'personal');
+});
+
+test('an existing savings account cannot be turned into a card', () => {
+  const savings = { id: 's', label: 'Ahorros', type: 'savings', currency: 'CRC', scope: 'personal' };
+  assert.match(accountPatch(savings, { label: 'Ahorros', type: 'card', issuer: 'bac', last4: '1234' }).error,
+    /cannot become a card/);
+});
+
+test("a card's network changes only when the form offers it", () => {
+  const card = { id: 'c', label: 'BAC VISA ₡', type: 'card', currency: 'CRC', scope: 'personal',
+    issuer: 'bac', last4: '4477', brand: 'visa' };
+  assert.equal(accountPatch(card, { label: 'BAC VISA ₡' }).row.brand, 'visa', 'absent is unchanged');
+  assert.equal(accountPatch(card, { label: 'BAC VISA ₡', brand: 'mastercard' }).row.brand, 'mastercard');
+  assert.equal(accountPatch(card, { label: 'BAC VISA ₡', brand: '' }).row.brand, null);
+  assert.equal(accountPatch(card, { label: 'BAC VISA ₡', scope: 'work' }).row.scope, 'personal',
+    'who pays is fixed once the card exists');
+});

@@ -16,7 +16,7 @@ import { afterLedgerChange } from './refresh.js';
 import { icon } from './icons.js';
 import {
   transferSources, transferDestinations, incomeAccounts,
-  validateTransfer, validateIncome, transferRow, incomeRow,
+  validateTransfer, validateIncome, transferRow, incomeRow, crossCurrency,
 } from './money-moves.js';
 
 const val = (id) => document.getElementById(id)?.value ?? '';
@@ -37,11 +37,15 @@ async function freshBalances() {
   return new Map(list.map((b) => [b.accountId, b]));
 }
 
-/** A balance recorded on or after the day picked already includes it. */
+/**
+ * A balance recorded on or after the day picked already includes it — the
+ * same day too, which is the easy one to trip on: set a card's balance this
+ * morning, pay it this afternoon, and the payment is already in that figure.
+ */
 function coveredNote(account, balance, date) {
-  if (!balance?.hasSnapshot || !date || date > balance.snapshotDate) return '';
+  if (!account || !balance?.hasSnapshot || !date || date > balance.snapshotDate) return '';
   return `The balance you recorded for ${esc(account.label)} on ${esc(crShortDate(balance.snapshotDate))} `
-    + 'already includes anything before it, so this is kept in its history without changing that balance.';
+    + 'already includes everything up to that day, so this is kept in its history without changing that balance.';
 }
 
 /* ------------------------------------------------------ Transfer to card */
@@ -97,10 +101,19 @@ export async function openTransfer(id) {
         }).join('')}
       </select></div>
 
+    <label class="amount-lbl" for="mv_amount" id="mv_lbl" hidden></label>
     <div class="amount-field">
-      <span class="amount-cur" id="mv_cur" style="display:grid;place-items:center;padding:0 14px;background:var(--surface)">₡</span>
+      <span class="amount-sym" id="mv_cur" aria-hidden="true">₡</span>
       <input class="amount-inp" id="mv_amount" type="number" inputmode="decimal" step="0.01" min="0"
              value="${existing?.amount ?? ''}" placeholder="0" aria-label="Amount">
+    </div>
+    <div id="mv_second" hidden>
+      <label class="amount-lbl" for="mv_amount2" id="mv_lbl2"></label>
+      <div class="amount-field">
+        <span class="amount-sym" id="mv_cur2" aria-hidden="true">$</span>
+        <input class="amount-inp" id="mv_amount2" type="number" inputmode="decimal" step="0.01" min="0"
+               value="${existing?.counterpartyAmount ?? ''}" placeholder="0">
+      </div>
     </div>
     <p class="move-hint" id="mv_hint" aria-live="polite"></p>
 
@@ -123,6 +136,7 @@ export async function openTransfer(id) {
     return {
       source, dest,
       amount: Number(val('mv_amount')),
+      destAmount: Number(val('mv_amount2')),
       date: val('mv_date'),
       balance: balances.get(source?.id),
       original: existing,
@@ -130,13 +144,31 @@ export async function openTransfer(id) {
   };
 
   // What it leaves behind, as you type — before Save, not after.
+  // Once Save has been pressed, every missing figure is an error worth
+  // showing; before that, only what has been typed is judged.
+  let tried = false;
   const hint = () => {
     const f = read();
+    const cross = crossCurrency(f.source, f.dest);
     document.getElementById('mv_cur').textContent = symbol(f.source?.currency);
+    // Across currencies there are two figures, so each says which it is.
+    // Within one there is only the one, and it needs no label.
+    const lbl = document.getElementById('mv_lbl');
+    lbl.hidden = !cross;
+    document.getElementById('mv_second').hidden = !cross;
+    if (cross) {
+      lbl.textContent = `Taken from ${f.source.label}`;
+      document.getElementById('mv_lbl2').textContent = `Paid off ${f.dest.label}`;
+      document.getElementById('mv_cur2').textContent = symbol(f.dest.currency);
+    }
     const el = document.getElementById('mv_hint');
     const lines = [];
     const typed = val('mv_amount') !== '';
-    const err = typed ? validateTransfer(f) : (!f.balance?.hasSnapshot ? validateTransfer({ ...f, amount: 1 }) : null);
+    const typed2 = tried || !cross || val('mv_amount2') !== '';
+    // Complain only about what has been filled in: an untouched second figure
+    // is not yet an error, but an overdraw on the first already is.
+    const err = typed ? validateTransfer(typed2 ? f : { ...f, destAmount: 1 })
+      : (!f.balance?.hasSnapshot ? validateTransfer({ ...f, amount: 1, destAmount: 1 }) : null);
     if (err) {
       el.className = 'move-hint bad';
       el.innerHTML = `${icon('alert', { size: 15 })}<span>${esc(err)}</span>`;
@@ -148,16 +180,21 @@ export async function openTransfer(id) {
       const after = typed ? available - f.amount : available;
       lines.push(`${fmt(available, f.source.currency)} in ${esc(f.source.label)}${typed ? ` · ${fmt(after, f.source.currency)} after` : ''}`);
     }
-    if (f.source && f.dest && f.source.currency !== f.dest.currency) {
-      lines.push(`${esc(f.dest.label)} is a ${f.dest.currency === 'USD' ? 'dollar' : 'colón'} balance: this is converted at the month’s rate once it is set.`);
+    // The rate the bank used, worked back from the two figures — a quick
+    // check that neither was mistyped.
+    if (cross && typed && typed2 && f.amount > 0 && f.destAmount > 0) {
+      const [crc, usd] = f.source.currency === 'CRC' ? [f.amount, f.destAmount] : [f.destAmount, f.amount];
+      lines.push(`That is ${money(crc / usd)} per dollar.`);
     }
-    const covered = coveredNote(f.source, f.balance, f.date);
-    if (covered) lines.push(covered);
+    for (const [acct, bal] of [[f.source, f.balance], [f.dest, balances.get(f.dest?.id)]]) {
+      const covered = coveredNote(acct, bal, f.date);
+      if (covered) lines.push(covered);
+    }
     el.className = 'move-hint';
     el.innerHTML = lines.map((l) => `<span>${l}</span>`).join('');
   };
 
-  for (const id2 of ['mv_source', 'mv_dest', 'mv_amount', 'mv_date']) {
+  for (const id2 of ['mv_source', 'mv_dest', 'mv_amount', 'mv_amount2', 'mv_date']) {
     document.getElementById(id2)?.addEventListener('input', hint);
     document.getElementById(id2)?.addEventListener('change', hint);
   }
@@ -166,9 +203,11 @@ export async function openTransfer(id) {
   document.getElementById('mv_save')?.addEventListener('click', async () => {
     const f = read();
     const err = validateTransfer(f);
-    if (err) { toast(err); hint(); return; }
+    if (err) { tried = true; toast(err); hint(); return; }
     const row = transferRow({ ...f, note: val('mv_note'), existing });
-    await save(row, 'mv_save', existing ? 'Transfer updated' : `Transferred ${fmt(f.amount, f.source.currency)} to ${f.dest.label}`);
+    const paid = crossCurrency(f.source, f.dest)
+      ? `${fmt(f.amount, f.source.currency)} (${fmt(f.destAmount, f.dest.currency)})` : fmt(f.amount, f.source.currency);
+    await save(row, 'mv_save', existing ? 'Transfer updated' : `Transferred ${paid} to ${f.dest.label}`);
   });
 }
 
@@ -210,7 +249,7 @@ export async function openIncome(id) {
       </select></div>
 
     <div class="amount-field">
-      <span class="amount-cur" id="in_cur" style="display:grid;place-items:center;padding:0 14px;background:var(--surface)">₡</span>
+      <span class="amount-sym" id="in_cur" aria-hidden="true">₡</span>
       <input class="amount-inp" id="in_amount" type="number" inputmode="decimal" step="0.01" min="0"
              value="${existing?.amount ?? ''}" placeholder="0" aria-label="Amount">
     </div>

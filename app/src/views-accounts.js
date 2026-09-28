@@ -276,8 +276,9 @@ function cardName(label) {
 }
 
 /**
- * One card, drawn as a card, with each balance on it. Tapping a balance
- * edits that half of the card.
+ * One card, drawn as a card, with each balance on it. Tapping a balance sets
+ * what that half owes; Settings edits the card itself — its name, cutoff and
+ * reminder, or archiving it.
  */
 function walletCard(group, monthKey) {
   group.sort((x, y) => (x.b.currency === 'CRC' ? -1 : y.b.currency === 'CRC' ? 1 : 0));
@@ -289,8 +290,8 @@ function walletCard(group, monthKey) {
     const owed = Math.abs(b.currentBalance);
     const crc = b.currency === 'CRC' ? null : toCrc(owed, b.currency, monthKey);
     const cur = b.currency === 'CRC' ? 'Colones' : b.currency === 'USD' ? 'Dollars' : esc(b.currency);
-    return `<button type="button" class="pcard-bal${owed ? '' : ' zero'}" onclick="acctEdit('${esc(b.accountId)}')"
-        aria-label="${esc(b.label)}: ${fmt(owed, b.currency)} owed. Edit">
+    return `<button type="button" class="pcard-bal${owed ? '' : ' zero'}" onclick="acctUpdate('${esc(b.accountId)}')"
+        aria-label="${esc(b.label)}: ${fmt(owed, b.currency)} owed. Set the balance">
       <span>${cur}</span>
       <b>${fmt(owed, b.currency)}</b>
       ${b.currency !== 'CRC' && owed ? `<small>${crc == null ? 'not converted' : `≈ ${money(crc)}`}</small>` : ''}
@@ -310,7 +311,11 @@ function walletCard(group, monthKey) {
     ${cutoffLine(group)}
     <div class="pcard-foot">
       <span class="pcard-num">•••• ${esc(a.last4 || '')}</span>
-      ${work ? `<span class="pcard-tag">${icon('briefcase')}Company card</span>` : ''}
+      <span class="pcard-foot-end">
+        ${work ? `<span class="pcard-tag">${icon('briefcase')}Company card</span>` : ''}
+        <button type="button" class="pcard-tag pcard-edit" onclick="acctEdit('${esc(group[0].b.accountId)}')"
+                aria-label="${esc(cardName(group[0].b.label))} settings">${icon('settings')}Settings</button>
+      </span>
     </div>
   </div>`;
 }
@@ -333,7 +338,7 @@ function cardsSection(list, monthKey) {
       <button class="btn soft sm" onclick="openTransfer()">${icon('transfer')}Transfer to card</button>
     </div>
     <p class="section-note lead">Worked out from your transactions, so they move on their own. Each card
-      settles its colón and dollar balances separately — tap one to edit it.</p>
+      settles its colón and dollar balances separately — tap one to set what it owes.</p>
     <div class="wallet">${[...groups.values()].map((g) => walletCard(g, monthKey)).join('')}</div>
   </section>`;
 }

@@ -135,7 +135,17 @@ export function matchRule(merchantRaw, mcc) {
 /* --------------------------------------------------------------- totals */
 
 /**
- * Personal spending only. Work-scope charges and transfers never count:
+ * Work, not personal: marked so, or on the company's own card. The card
+ * decides as well as the flag, because the flag is only a default at import
+ * and a sheet can change it — a charge on the BNCR card is the company's
+ * whatever it is marked.
+ */
+export function isWork(t) {
+  return t.scope === 'work' || accountById(t.accountId)?.scope === 'work';
+}
+
+/**
+ * Personal spending only. Work charges and transfers never count:
  * a transfer moves money, it does not spend it.
  */
 export function spendTotals(rows) {
@@ -167,7 +177,7 @@ export function spendTotals(rows) {
       continue;
     }
 
-    if (t.scope === 'work') { out.work += crc; continue; }
+    if (isWork(t)) { out.work += crc; continue; }
     if (t.kind !== 'expense') continue;
 
     out.total += crc;
@@ -192,7 +202,7 @@ export function spendTotals(rows) {
 export function spendByDay(rows) {
   const out = {};
   for (const t of rows ?? []) {
-    if (t.status === 'voided' || t.scope === 'work' || t.kind !== 'expense') continue;
+    if (t.status === 'voided' || isWork(t) || t.kind !== 'expense') continue;
     const crc = effectiveCrc(t);
     if (crc == null) continue;
     const day = crDay(t.postedAt);

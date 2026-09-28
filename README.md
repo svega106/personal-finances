@@ -218,12 +218,37 @@ transfer may not take savings below zero, and needs that account's balance
 recorded to know. The debit card on `Ahorros ₡` is recorded on the savings
 row, so it is a source, never a destination.
 
+Paying a card in another currency — colones out of savings, dollars off the
+card — takes two figures, because the bank converts at its own rate that day:
+what left savings is `amount`, what came off the card is
+`counterparty_amount` (0011), in the card's currency, used by the balance view
+as it is. Within one currency the second figure is neither asked for nor
+stored, and the row is what it always was.
+
+**A card's balance** is set by tapping it in Accounts: what the bank says is
+owed right now. It is a balance snapshot like a savings account's, stored
+negative. Everything dated after it is added on top — but not the same day,
+so a payment dated the day a balance was set is already in that figure; the
+transfer sheet says so when that happens. The card's own settings (name,
+network, cutoff, removing it) are behind **Settings** on the card.
+
+**Adding and removing cards.** Accounts → Add account → Credit card adds the
+card's colón and dollar balances together (or only one), with its network,
+cutoff and who pays it. A bank whose emails are not read is *Another bank*;
+its charges are added by hand. **Remove card** archives both halves: they
+leave every list, total and reminder, and their transactions stay in
+Activity.
+
+**The company's card** (BNCR, and any card added as paid by *My company*) is
+left out of net position — only personal accounts are summed — and out of
+spending. Spending decides by the card as well as the charge's own Work flag,
+so a charge on that card counts as work even if it is marked Personal.
+
 **Add income** puts money into a savings account as `kind = 'income'`. Neither
 kind is spending: both are left out of every spending total, show in Activity
 with their own label, and appear under each account they touch.
 
-**Cutoffs** are set per credit card — Accounts, tap one of the card's
-balances: the day of the month the statement closes, and how many days before
+**Cutoffs** are set per credit card — Accounts, the card's Settings: the day of the month the statement closes, and how many days before
 to be reminded. Both currency halves of a card share them. The dashboard lists
 every cutoff, soonest first, marked once inside its card's window.
 

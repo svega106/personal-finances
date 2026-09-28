@@ -192,3 +192,76 @@ test('a transfer appears under both accounts, and under no spending category', (
   assert.deepEqual(kinds({ account: 'c-visa' }), ['transfer', 'expense'], 'found from the side it arrived on');
   assert.deepEqual(kinds({ cat: 'none' }), ['expense'], 'not "uncategorized" spending');
 });
+
+/* ------------------------------------------------ between two currencies */
+
+const VISA_USD = { id: 'c-visa-usd', label: 'BAC VISA $', type: 'card', currency: 'USD', scope: 'personal',
+  issuer: 'bac', last4: '4477' };
+const cross = { source: AHORROS, dest: VISA_USD, amount: 52000, destAmount: 100, date: '2026-09-10', balance: funded };
+
+test('colones to a dollar card asks for both figures', () => {
+  assert.equal(validateTransfer(cross), null);
+  for (const destAmount of [undefined, 0, -1, NaN]) {
+    assert.match(validateTransfer({ ...cross, destAmount }), /came off BAC VISA \$, in dollars/, String(destAmount));
+  }
+  // What leaves savings is still held to what savings has.
+  assert.match(validateTransfer({ ...cross, amount: 100000.01 }), /below zero/);
+});
+
+test('within one currency the second figure is neither asked for nor written', () => {
+  assert.equal(validateTransfer({ ...ok, destAmount: undefined }), null);
+  const t = transferRow({ ...ok, destAmount: 999 });
+  assert.equal(t.counterpartyAmount, null, 'a stale second figure is never written');
+});
+
+test('a transfer between currencies records what left and what arrived', () => {
+  const t = transferRow(cross);
+  assert.equal(t.amount, 52000);
+  assert.equal(t.currency, 'CRC');
+  assert.equal(t.counterpartyAmount, 100);
+  assert.equal(t.counterpartyAccountId, 'c-visa-usd');
+  assert.equal(incomeRow({ account: AHORROS, amount: 1, date: '2026-09-10' }).counterpartyAmount, null);
+});
+
+test('colones out of savings, dollars off the card — no rate involved', async () => {
+  const repo = createMemoryRepo({
+    accounts: [AHORROS, VISA, VISA_USD],
+    snapshots: [{ id: 'sn', accountId: 's-crc', asOf: '2026-09-01', balance: 100000, currency: 'CRC' }],
+    transactions: [{
+      id: 'x', extId: 'e1', kind: 'expense', postedAt: '2026-09-05T12:00:00-06:00', amount: 150,
+      currency: 'USD', accountId: 'c-visa-usd', scope: 'personal', status: 'settled',
+    }],
+  });
+  const balances = async () => Object.fromEntries(
+    (await repo.listAccountBalances()).map((b) => [b.accountId, b.currentBalance]));
+
+  await repo.upsertTransaction(transferRow(cross));
+  assert.deepEqual(await balances(), { 's-crc': 48000, 'c-visa': 0, 'c-visa-usd': -50 },
+    '₡52,000 out of savings; $100 off the $150 owed; the colón half untouched');
+
+  // And a same-currency one right after moves one figure on both ends.
+  await repo.upsertTransaction(transferRow({ ...ok, dest: VISA, amount: 8000 }));
+  assert.deepEqual(await balances(), { 's-crc': 40000, 'c-visa': 8000, 'c-visa-usd': -50 });
+});
+
+/* ------------------------------------------------ the company's card */
+
+test("a charge on the company's card is never personal spending, whatever it is marked", async () => {
+  const { setRepo } = await import('../src/repo.js');
+  const { loadReference, spendTotals, spendByDay, isWork } = await import('../src/tx.js');
+  setRepo(createMemoryRepo({ accounts: [VISA, BNCR] }));
+  await loadReference();
+
+  const charge = (accountId, scope) => ({
+    kind: 'expense', amount: 10000, currency: 'CRC', accountId, scope,
+    cat: 'wants', status: 'settled', postedAt: '2026-09-05T12:00:00-06:00',
+  });
+  // Marked personal by hand, but on the BNCR card.
+  const rows = [charge('c-visa', 'personal'), charge('c-bncr', 'personal'), charge('c-bncr', 'work')];
+  assert.deepEqual(rows.map(isWork), [false, true, true]);
+
+  const t = spendTotals(rows);
+  assert.equal(t.total, 10000, 'only the personal card counts');
+  assert.equal(t.work, 20000);
+  assert.deepEqual(Object.values(spendByDay(rows)), [10000]);
+});
