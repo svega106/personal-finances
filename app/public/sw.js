@@ -103,29 +103,42 @@ self.addEventListener('fetch', (event) => {
   }
 });
 
-/* ------------------------------------------------------------ reminders */
+/* -------------------------------------------------------- notifications */
 
 /**
- * A reminder from send-cutoff-reminders. The payload is JSON: title, body,
- * tag, url. The tag is per card per billing cycle, so a second copy replaces
- * the first rather than stacking.
+ * A push from the server. The payload is JSON: kind, title, body, tag, url.
+ *
+ *   charge  a new card charge, from ingest-email, tagged per charge
+ *   cutoff  a statement about to close, from send-cutoff-reminders, tagged
+ *           per card per billing cycle
+ *
+ * The tag makes a second copy replace the first rather than stack.
  *
  * Something is always shown: a push that displays nothing is treated by the
  * browser as abuse, and it may stop delivering to this app.
+ *
+ * A new charge also tells any open window, so the app on screen shows it
+ * without waiting for its own once-a-minute check (live.js).
  */
 self.addEventListener('push', (event) => {
   let data = {};
   try { data = event.data ? event.data.json() : {}; } catch { data = { body: event.data?.text() }; }
-  event.waitUntil(self.registration.showNotification(data.title || 'Finances', {
-    body: data.body || '',
-    icon: '/icons/icon-192.png',
-    badge: '/icons/icon-192.png',
-    tag: data.tag,
-    data: { url: data.url || '/' },
-  }));
+  event.waitUntil((async () => {
+    await self.registration.showNotification(data.title || 'Finances', {
+      body: data.body || '',
+      icon: '/icons/icon-192.png',
+      badge: '/icons/icon-192.png',
+      tag: data.tag,
+      data: { url: data.url || '/' },
+    });
+    if (data.kind === 'charge') {
+      const open = await self.clients.matchAll({ type: 'window' });
+      for (const client of open) client.postMessage({ type: 'ledger-changed' });
+    }
+  })());
 });
 
-/** Opening a reminder brings the app forward, on the page it points at. */
+/** Opening a notification brings the app forward, on the page it points at. */
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   const url = new URL(event.notification.data?.url || '/', self.location.origin).href;

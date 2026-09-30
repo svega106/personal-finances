@@ -72,12 +72,14 @@ export function createMemoryRepo(seed = {}) {
         row.id = row.id || `tx${seq++}`;
         store.transactions.push(row);
       }
+      store.ledgerRev = (store.ledgerRev ?? 0) + 1;
       return structuredClone(row);
     },
 
     async deleteTransaction(id) {
       const at = store.transactions.findIndex((x) => x.id === id);
       if (at >= 0) store.transactions.splice(at, 1);
+      store.ledgerRev = (store.ledgerRev ?? 0) + 1;
     },
 
     /* ----------------------------------------------------------- balances */
@@ -174,6 +176,23 @@ export function createMemoryRepo(seed = {}) {
     async savePushSubscription(sub) {
       store.push = (store.push ?? []).filter((s) => s.endpoint !== sub.endpoint);
       store.push.push(structuredClone(sub));
+    },
+
+    async getPushPrefs(endpoint) {
+      const s = (store.push ?? []).find((x) => x.endpoint === endpoint);
+      return s ? { charges: s.charges ?? true, cutoffs: s.cutoffs ?? true } : null;
+    },
+
+    async savePushPrefs(endpoint, prefs) {
+      const s = (store.push ?? []).find((x) => x.endpoint === endpoint);
+      if (!s) return;
+      if (prefs.charges !== undefined) s.charges = !!prefs.charges;
+      if (prefs.cutoffs !== undefined) s.cutoffs = !!prefs.cutoffs;
+    },
+
+    /** Changes with every write, as the real one does with every row's updated_at. */
+    async ledgerMarker() {
+      return `${store.transactions.length}|${store.ledgerRev ?? 0}`;
     },
 
     async deletePushSubscription(endpoint) {

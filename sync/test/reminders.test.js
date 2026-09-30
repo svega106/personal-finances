@@ -115,3 +115,13 @@ test('two runs racing send it once: the claim decides', async () => {
   assert.equal(w.pushes.length, 1);
   assert.equal(a.sent.length + b.sent.length, 1);
 });
+
+test('reminders go only to devices with cutoff reminders switched on', async () => {
+  const w = world({ cards: VISA, devices: { u1: [PHONE] } });
+  const asked = [];
+  const list = w.deps.listSubscriptions;
+  w.deps.listSubscriptions = async (userId, kind) => { asked.push(kind); return list(userId, kind); };
+  await runReminders(w.deps, '2026-10-13');
+  assert.deepEqual(asked, ['cutoffs']);
+  assert.equal(w.pushes[0].kind, 'cutoff', 'marked, so the app does not reload its ledger for it');
+});

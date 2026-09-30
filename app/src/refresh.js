@@ -27,6 +27,19 @@ import { updateNavBadge } from './views-tx.js';
 import { render, getCurrentMonth } from './app.js';
 
 /**
+ * Told as every ledger reload starts, before anything is fetched. live.js
+ * uses it to note what the screen is about to show, so its once-a-minute
+ * check does not reload again for a change this reload already includes.
+ */
+const reloadListeners = [];
+export function onReload(fn) { reloadListeners.push(fn); }
+function reloading() {
+  for (const fn of reloadListeners) {
+    try { fn(); } catch { /* a listener never stops a reload */ }
+  }
+}
+
+/**
  * A transaction was added, changed or deleted.
  *
  * `month` is the month the charge is dated in, which is not always the month
@@ -34,6 +47,7 @@ import { render, getCurrentMonth } from './app.js';
  * reload both, or the one you are looking at keeps a row that left it.
  */
 export async function afterLedgerChange(month) {
+  reloading();
   const viewing = getCurrentMonth();
   const months = month && month !== viewing ? [viewing, month] : [viewing];
 
@@ -72,6 +86,7 @@ export async function afterAccountChange() {
  */
 export async function refreshAll() {
   await flush();
+  reloading();
 
   const month = getCurrentMonth();
   invalidateAccounts();

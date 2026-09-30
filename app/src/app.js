@@ -10,7 +10,7 @@ import { icon, merchantIcon, goalIconName, goalTint, cardThumb } from './icons.j
 import { chartSlot, drawCharts, resetCharts, donut } from './charts.js';
 import { crDay, crMonth, crHour, crLongDate, crTimeLabel, crShortDate } from './cr-date.js';
 import { upcomingCutoffs } from '../../supabase/functions/_shared/cutoff.js';
-import { pushState, enablePush, disablePush, testNotification } from './push.js';
+import { pushState, enablePush, disablePush, testNotification, pushPrefs, setPushPref } from './push.js';
 
 let currentMonth = monthKey();
 let annualYear = +currentMonth.slice(0,4);
@@ -1021,9 +1021,9 @@ function renderSettings(){
     </div>
     <div class="stack">
       <section class="card">
-        <div class="card-head"><div><h3>Cutoff reminders</h3>
-          <div class="card-sub">A notification on this device before each credit card's statement closes.
-            When, and how many days ahead, is set on each card — Accounts, then the card's Settings.</div></div></div>
+        <div class="card-head"><div><h3>Notifications</h3>
+          <div class="card-sub">On this device: each new card charge as it comes in, and a reminder before
+            a card's statement closes. Cutoffs are set on each card — Accounts, then the card's Settings.</div></div></div>
         <div id="pushBody" aria-live="polite"><div class="skel skel-line" style="width:60%;height:14px"></div></div>
       </section>
       <section class="card">
@@ -1050,9 +1050,9 @@ function renderSettings(){
  * state says what it means and, where there is one, what to do about it.
  */
 const PUSH_COPY = {
-  unsupported: ['This browser cannot receive push notifications.', 'The dashboard still shows every cutoff, with a warning as each one gets close.'],
-  'needs-install': ['On iPhone and iPad, reminders need the app on your Home Screen.', 'In Safari: Share → Add to Home Screen, then open Finances from there and turn reminders on.'],
-  'no-worker': ['Reminders need the installed app or the live site.', 'The service worker that receives them is not running on this page (the dev server skips it).'],
+  unsupported: ['This browser cannot receive push notifications.', 'New charges still show up in Activity, and the dashboard still shows every cutoff.'],
+  'needs-install': ['On iPhone and iPad, notifications need the app on your Home Screen.', 'In Safari: Share → Add to Home Screen, then open Finances from there and turn notifications on.'],
+  'no-worker': ['Notifications need the installed app or the live site.', 'The service worker that receives them is not running on this page (the dev server skips it).'],
   denied: ['Notifications are blocked for this site.', 'Only the browser can undo that: allow notifications in its site settings, then come back here.'],
 };
 
@@ -1061,6 +1061,12 @@ async function paintPush(){
   if (!el) return;
   let state;
   try { state = await pushState(); } catch { state = 'unsupported'; }
+  // Which kinds this device gets. null when they could not be read, and the
+  // switches are then shown but not usable, rather than guessed at.
+  let prefs = null;
+  if (state === 'on') {
+    try { prefs = await pushPrefs(); } catch (err) { console.warn('[push]', err.message); }
+  }
   if (!document.body.contains(el)) return;
 
   const cards = upcomingCutoffs(getAccounts(), crDay(new Date())).length;
@@ -1070,18 +1076,27 @@ async function paintPush(){
         <button class="linkbtn" onclick="setView('accounts')">Set one on Accounts</button>.</div>`;
 
   if (state === 'on') {
+    const on = prefs ?? { charges: true, cutoffs: true };
+    const kind = (k, title, text) => `<div class="set-row">
+        <label class="set-text" for="push_${k}"><b>${title}</b><span>${text}</span></label>
+        <span class="switch"><input type="checkbox" role="switch" id="push_${k}"${on[k] ? ' checked' : ''}${prefs ? '' : ' disabled'}
+          onchange="setPushKind('${k}', this.checked)"><span aria-hidden="true"></span></span>
+      </div>`;
     el.innerHTML = `<div class="set-row">
         <div class="set-text"><b>${icon('check-circle', { size: 16 })} On for this device</b><span>Other devices are switched on separately.</span></div>
         <div class="preset-row" style="margin:0">
           <button class="btn ghost sm" onclick="pushTest()">Send a test</button>
           <button class="btn ghost sm" onclick="setPush(false)">Turn off</button>
         </div>
-      </div>${scope}`;
+      </div>
+      ${kind('charges', 'New charges', 'Each card charge as the sync brings it in, within about 15 minutes. Tap one to categorize it.')}
+      ${kind('cutoffs', 'Cutoff reminders', 'Before each card’s statement closes.')}
+      ${prefs ? scope : '<div class="card-note" style="margin-top:12px">Could not read which kinds this device gets. Try again in a moment.</div>'}`;
   } else if (state === 'off') {
     el.innerHTML = `<div class="set-row">
         <div class="set-text"><b>Off for this device</b><span>You will be asked to allow notifications.</span></div>
-        <button class="btn sm" onclick="setPush(true)">${icon('bell', { size: 16 })}Turn on reminders</button>
-      </div>${scope}`;
+        <button class="btn sm" onclick="setPush(true)">${icon('bell', { size: 16 })}Turn on notifications</button>
+      </div>`;
   } else {
     const [what, fix] = PUSH_COPY[state] ?? PUSH_COPY.unsupported;
     el.innerHTML = `<div class="push-note">${icon('info', { size: 18 })}<div><b>${what}</b><span>${fix}</span></div></div>${scope}`;
@@ -1093,15 +1108,30 @@ export async function setPush(on){
   buttons.forEach((b) => { b.disabled = true; });
   try {
     const state = on ? await enablePush() : await disablePush();
-    if (on && state === 'on') toast('Reminders are on for this device');
+    if (on && state === 'on') toast('Notifications are on for this device');
     else if (on && state === 'denied') toast('Notifications were blocked — see below for how to allow them');
     else if (on && state === 'off') toast('Not turned on — the browser was not given permission');
-    else if (!on) toast('Reminders are off for this device');
+    else if (!on) toast('Notifications are off for this device');
   } catch (err) {
     console.error('[push]', err);
-    toast(`Could not ${on ? 'turn on' : 'turn off'} reminders: ${err.message}`);
+    toast(`Could not ${on ? 'turn on' : 'turn off'} notifications: ${err.message}`);
   }
   paintPush();
+}
+
+/** One kind of notification on or off, for this device only. */
+export async function setPushKind(kind, on){
+  const box = document.getElementById(`push_${kind}`);
+  if (box) box.disabled = true;
+  try {
+    await setPushPref(kind, on);
+    toast(`${kind === 'charges' ? 'New charges' : 'Cutoff reminders'} ${on ? 'on' : 'off'} for this device`);
+  } catch (err) {
+    if (box) box.checked = !on;
+    toast(`Could not change it: ${err.message}`);
+  } finally {
+    if (box) box.disabled = false;
+  }
 }
 
 export async function pushTest(){

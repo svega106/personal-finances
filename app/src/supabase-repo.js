@@ -329,6 +329,20 @@ function balanceFromRow(r) {
 
 export function extendWithBalances(repo) {
   return Object.assign(repo, {
+    /**
+     * A string that changes whenever the ledger does: how many rows, and the
+     * newest edit. One indexed row (0012), so an open app can ask every
+     * minute. A delete changes the count; an insert or an edit, the time.
+     */
+    async ledgerMarker() {
+      const uid = await userId();
+      const { data, count, error } = await supabase
+        .from('transactions').select('updated_at', { count: 'exact' })
+        .eq('user_id', uid).order('updated_at', { ascending: false }).limit(1);
+      if (error) boom('check for changes', error);
+      return `${count ?? 0}|${data?.[0]?.updated_at ?? ''}`;
+    },
+
     async listAccountBalances() {
       const uid = await userId();
       const { data, error } = await supabase
@@ -450,6 +464,30 @@ export function extendWithBalances(repo) {
         .upsert({ user_id: uid, endpoint, p256dh, auth, user_agent: userAgent ?? null },
                 { onConflict: 'endpoint' });
       if (error) boom('save push subscription', error);
+    },
+
+    /**
+     * Which notifications this device gets (0012), or null when the server
+     * has no row for it — it is re-saved at the next start-up, both on.
+     */
+    async getPushPrefs(endpoint) {
+      const uid = await userId();
+      const { data, error } = await supabase
+        .from('push_subscriptions').select('notify_charges, notify_cutoffs')
+        .eq('user_id', uid).eq('endpoint', endpoint).maybeSingle();
+      if (error) boom('load notification settings', error);
+      return data ? { charges: data.notify_charges, cutoffs: data.notify_cutoffs } : null;
+    },
+
+    /** Only the kinds given change. */
+    async savePushPrefs(endpoint, { charges, cutoffs }) {
+      const uid = await userId();
+      const patch = {};
+      if (charges !== undefined) patch.notify_charges = !!charges;
+      if (cutoffs !== undefined) patch.notify_cutoffs = !!cutoffs;
+      const { error } = await supabase
+        .from('push_subscriptions').update(patch).eq('user_id', uid).eq('endpoint', endpoint);
+      if (error) boom('save notification settings', error);
     },
 
     async deletePushSubscription(endpoint) {

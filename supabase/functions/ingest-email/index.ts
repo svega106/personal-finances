@@ -12,12 +12,19 @@
  * `--no-verify-jwt` is deliberate. The caller is a script, not a signed-in
  * person, so there is no user JWT to check; authentication is the shared
  * secret below instead.
+ *
+ * Each charge it inserts is also announced on the devices that have new-charge
+ * notifications on (_shared/charge-alerts.js). That needs the VAPID secrets
+ * described in _shared/web-push.ts; without them the import works as before
+ * and the response says why nothing was sent.
  */
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 import { parseEmail } from '../_shared/parsers.js';
 import { matchRule } from '../_shared/classify.js';
 import { toTransactionRow, findAccount } from '../_shared/to-row.js';
 import { repairPostedAt } from '../_shared/repair.js';
+import { chargeAlerts, sendChargeAlerts } from '../_shared/charge-alerts.js';
+import { vapidProblem, createSender } from '../_shared/web-push.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_ROLE = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -43,6 +50,55 @@ const json = (body: unknown, status = 200) =>
   });
 
 type Incoming = { id?: string; from: string; subject?: string; body?: string; html?: string };
+
+/** What a notification needs to know about a charge the insert created. */
+const INSERTED_COLS = 'id, kind, status, posted_at, merchant, merchant_raw, amount, currency, account_id, scope, cat';
+
+/** Long enough for a few pushes; short enough that a stuck one never stalls the sync. */
+const NOTIFY_BUDGET_MS = 15_000;
+
+/**
+ * Announce newly inserted charges. Never throws, and never takes longer than
+ * NOTIFY_BUDGET_MS: the charges are saved whatever happens here, and a failed
+ * import would only make the sync send the same emails again.
+ */
+// deno-lint-ignore no-explicit-any
+async function notify(db: any, userId: string, inserted: any[], accounts: any[]) {
+  try {
+    const alerts = chargeAlerts(inserted, accounts, new Date());
+    if (!alerts.length) return { alerts: 0 };
+    const problem = vapidProblem();
+    if (problem) return { alerts: alerts.length, skipped: problem };
+
+    // A charge alert is worth a few hours to a phone that is offline, not a
+    // day; and it is sent at high urgency, as a bank's own alert would be.
+    const send = createSender({ ttlSeconds: 6 * 3600, urgency: 'high' });
+    const run = sendChargeAlerts({
+      async listSubscriptions(uid: string) {
+        const { data, error } = await db.from('push_subscriptions')
+          .select('endpoint, p256dh, auth').eq('user_id', uid).eq('notify_charges', true);
+        if (error) throw new Error(`subscriptions: ${error.message}`);
+        return data ?? [];
+      },
+      send,
+      async removeSubscription(endpoint: string) {
+        await db.from('push_subscriptions').delete().eq('endpoint', endpoint);
+      },
+    }, userId, alerts);
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise((resolve) => {
+      timer = setTimeout(() => resolve({ alerts: alerts.length, errors: ['timed out'] }), NOTIFY_BUDGET_MS);
+    });
+    const report = await Promise.race([run, late]);
+    clearTimeout(timer);
+    console.log('[notify]', JSON.stringify(report));
+    return report;
+  } catch (err) {
+    console.error('[notify]', (err as Error).message);
+    return { error: (err as Error).message };
+  }
+}
 
 /**
  * What a run is for.
@@ -102,7 +158,7 @@ Deno.serve(async (req: Request) => {
   const [{ data: accounts, error: accErr }, { data: rawRules, error: ruleErr }] =
     await Promise.all([
       db.from('accounts')
-        .select('id, issuer, last4, default_currency, scope, active')
+        .select('id, label, issuer, last4, default_currency, scope, active')
         .eq('user_id', userId).eq('active', true),
       db.from('rules')
         .select('id, pattern, match_type, priority, cat, budget_line_id, scope, merchant_clean')
@@ -172,6 +228,8 @@ Deno.serve(async (req: Request) => {
   }
 
   let imported = 0;
+  // deno-lint-ignore no-explicit-any
+  let inserted: any[] = [];
   if (rows.length) {
     // ignoreDuplicates, NOT a plain upsert. A charge already in the table may
     // have been recategorized or renamed by hand since it arrived; re-running
@@ -179,10 +237,14 @@ Deno.serve(async (req: Request) => {
     const { data, error } = await db
       .from('transactions')
       .upsert(rows, { onConflict: 'user_id,ext_id', ignoreDuplicates: true })
-      .select('id');
+      // Only the rows actually inserted come back; duplicates do not.
+      .select(INSERTED_COLS);
     if (error) return json({ error: `insert: ${error.message}` }, 500);
-    imported = (data ?? []).length;
+    inserted = data ?? [];
+    imported = inserted.length;
   }
+
+  const notified = await notify(db, userId, inserted, accounts ?? []);
 
   return json({
     ok: true,
@@ -192,5 +254,6 @@ Deno.serve(async (req: Request) => {
     duplicates: rows.length - imported,
     skipped,
     unmatchedAccount: rows.filter((r) => r.account_id === null).length,
+    notified,
   });
 });

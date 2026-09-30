@@ -1,6 +1,7 @@
 /**
- * Reminders on this device: the permission, the subscription, and saying
- * plainly when either is not possible.
+ * Notifications on this device — each new charge, and the cutoff reminders:
+ * the permission, the subscription, which kinds this device gets, and saying
+ * plainly when any of it is not possible.
  *
  * Permission is only ever asked for from the Settings switch — never on load.
  * A browser that has been asked once and refused will not ask again, so the
@@ -15,7 +16,10 @@
  *   no-worker      no service worker (the dev server runs without one)
  *   denied         refused; only the browser's own settings can undo that
  *   off            possible, not switched on here
- *   on             this device receives reminders
+ *   on             this device receives notifications
+ *
+ * Which kinds — new charges, cutoff reminders — is kept per device on its
+ * subscription row, so a phone can have both and a laptop only one.
  */
 import { getRepo } from './repo.js';
 import { VAPID_PUBLIC_KEY } from './push-config.js';
@@ -110,12 +114,34 @@ export async function refreshPushSubscription() {
   }
 }
 
-/** Shows a reminder-shaped notification now, through the service worker. */
+async function currentEndpoint() {
+  const sub = await (await registration())?.pushManager.getSubscription();
+  return sub?.endpoint ?? null;
+}
+
+/**
+ * Which kinds this device gets: { charges, cutoffs }. Both on when the server
+ * has no row for it yet — a new subscription starts that way.
+ */
+export async function pushPrefs() {
+  const endpoint = await currentEndpoint();
+  if (!endpoint) return null;
+  return (await getRepo().getPushPrefs(endpoint)) ?? { charges: true, cutoffs: true };
+}
+
+/** Switch one kind on or off for this device. */
+export async function setPushPref(kind, on) {
+  const endpoint = await currentEndpoint();
+  if (!endpoint) throw new Error('Notifications are not on for this device.');
+  await getRepo().savePushPrefs(endpoint, { [kind]: on });
+}
+
+/** Shows a notification shaped like a new-charge alert now, through the service worker. */
 export async function testNotification() {
   const reg = await registration();
   if (!reg) throw new Error('No service worker on this page.');
-  await reg.showNotification('Reminders are on', {
-    body: 'This is what a cutoff reminder looks like on this device.',
+  await reg.showNotification('Notifications are on', {
+    body: 'A new charge will look like this: its amount and where, then the card it was on.',
     icon: '/icons/icon-192.png',
     badge: '/icons/icon-192.png',
     tag: 'test',

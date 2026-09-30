@@ -9,22 +9,16 @@
  *
  * Deploy:  npx supabase functions deploy send-cutoff-reminders --no-verify-jwt
  *
- * Secrets (Edge Functions -> Secrets, or `supabase secrets set`):
- *   INGEST_SECRET      the one the sync already uses
- *   VAPID_PUBLIC_KEY   \ the pair the app subscribes with; the public half
- *   VAPID_PRIVATE_KEY  / is also in app/src/push-config.js
- *   VAPID_SUBJECT      mailto: or https: contact the push services can reach
+ * Secrets: INGEST_SECRET, the one the sync already uses, and the VAPID trio
+ * described in _shared/web-push.ts.
  */
 import { createClient } from 'jsr:@supabase/supabase-js@2';
-import webpush from 'npm:web-push@3.6.7';
 import { runReminders } from '../_shared/reminders.js';
+import { vapidProblem, createSender, type Device } from '../_shared/web-push.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_ROLE = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const SECRET = Deno.env.get('INGEST_SECRET') ?? '';
-const VAPID_PUBLIC = Deno.env.get('VAPID_PUBLIC_KEY') ?? '';
-const VAPID_PRIVATE = Deno.env.get('VAPID_PRIVATE_KEY') ?? '';
-const VAPID_SUBJECT = Deno.env.get('VAPID_SUBJECT') ?? '';
 
 /** Constant time, as in ingest-email: `===` on a secret leaks it by timing. */
 function secretOk(given: string): boolean {
@@ -46,13 +40,10 @@ Deno.serve(async (req: Request) => {
   if (req.method !== 'POST') return json({ error: 'POST only' }, 405);
   if (!secretOk(req.headers.get('x-ingest-secret') ?? '')) return json({ error: 'unauthorized' }, 401);
 
-  if (!VAPID_PUBLIC || !VAPID_PRIVATE || !VAPID_SUBJECT) {
-    return json({ error: 'Set VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY and VAPID_SUBJECT as function secrets.' }, 500);
-  }
-  if (VAPID_SUBJECT.includes('REPLACE')) {
-    return json({ error: 'VAPID_SUBJECT is still the placeholder — set it to mailto:<your address> or the app’s https URL.' }, 500);
-  }
-  webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC, VAPID_PRIVATE);
+  const problem = vapidProblem();
+  if (problem) return json({ error: problem }, 500);
+  // A reminder still matters a day later; the cutoff is days away.
+  const send = createSender({ ttlSeconds: 24 * 3600 });
 
   // The day in Costa Rica. `{ "today": "YYYY-MM-DD" }` overrides it, which is
   // how a reminder is tried out without waiting for its cutoff.
@@ -89,8 +80,10 @@ Deno.serve(async (req: Request) => {
       return (data ?? []).map((r) => ({ userId: r.user_id, cardKey: r.card_key, cutoffDate: r.cutoff_date }));
     },
     async listSubscriptions(userId: string) {
+      // Only devices that still want reminders; each is switched separately
+      // in the app's Settings (0012).
       const { data, error } = await db.from('push_subscriptions')
-        .select('endpoint, p256dh, auth').eq('user_id', userId);
+        .select('endpoint, p256dh, auth').eq('user_id', userId).eq('notify_cutoffs', true);
       if (error) fail('subscriptions', error);
       return data ?? [];
     },
@@ -106,20 +99,7 @@ Deno.serve(async (req: Request) => {
         .eq('user_id', e.userId).eq('card_key', e.cardKey).eq('cutoff_date', e.cutoffDate);
       if (error) fail('release reminder', error);
     },
-    async send(s: { endpoint: string; p256dh: string; auth: string }, payload: unknown) {
-      try {
-        await webpush.sendNotification(
-          { endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } },
-          JSON.stringify(payload),
-          { TTL: 24 * 3600 },
-        );
-        return { ok: true };
-      } catch (err) {
-        const status = (err as { statusCode?: number }).statusCode;
-        // 404 and 410 are the push service saying this device is gone for good.
-        return { ok: false, gone: status === 404 || status === 410, error: `${status ?? ''} ${(err as Error).message}`.trim() };
-      }
-    },
+    send: (d: Device, payload: unknown) => send(d, payload),
     async removeSubscription(endpoint: string) {
       const { error } = await db.from('push_subscriptions').delete().eq('endpoint', endpoint);
       if (error) fail('remove subscription', error);

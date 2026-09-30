@@ -9,16 +9,17 @@ import {
   updIncome, updInvest, updItem, addItem, delItem, updContribution, copyMonth,
   clearMonth, goalModal, saveGoal, delGoal, addToGoal, confirmAddGoal, updAlloc,
   liveAlloc, setAlloc, exportData, importData, resetAll, closeModal, updCarryover,
-  useCarryover, gotoMonth, stepYear, setTheme, openMore, setUser, setPush, pushTest,
+  useCarryover, gotoMonth, stepYear, setTheme, openMore, setUser, setPush, pushTest, setPushKind,
 } from './app.js';
 import { openTransfer, openIncome, moveDelete, openAddChooser } from './money-actions.js';
 import { refreshPushSubscription } from './push.js';
 import { txSetFilter, txClearFilters, txEdit, txSave, txDelete, txRateModal } from './tx-actions.js';
+import { startLive } from './live.js';
 import {
   acctUpdate, acctAdd, acctEdit, acctArchive, acctPickWork, acctSelectAllWork,
   acctSettleOne, acctSettleSelected, acctUnsettle,
 } from './accounts-actions.js';
-import { loadReference, loadMonth } from './tx.js';
+import { loadReference, loadMonth, findCached } from './tx.js';
 import { updateNavBadge } from './views-tx.js';
 import { crMonth } from './cr-date.js';
 import { refreshAll } from './refresh.js';
@@ -85,7 +86,7 @@ function wire() {
     updIncome, updInvest, updItem, addItem, delItem, updContribution, copyMonth, clearMonth,
     goalModal, saveGoal, delGoal, addToGoal, confirmAddGoal, updAlloc, liveAlloc, setAlloc,
     exportData, importData, resetAll, closeModal, updCarryover, useCarryover, gotoMonth, stepYear,
-    setTheme, openMore, doSignOut: () => signOut(), setPush, pushTest,
+    setTheme, openMore, doSignOut: () => signOut(), setPush, pushTest, setPushKind,
     openTransfer, openIncome, moveDelete, openAddChooser,
     txSetFilter, txClearFilters, txEdit, txSave, txDelete, txRateModal,
     acctUpdate, acctAdd, acctEdit, acctArchive, acctPickWork, acctSelectAllWork,
@@ -97,6 +98,38 @@ function wire() {
 function firstView() {
   const v = new URLSearchParams(window.location.search).get('view');
   return VIEWS.includes(v) ? v : 'dashboard';
+}
+
+/** The month before a 'YYYY-MM' key. */
+function monthBefore(key) {
+  const [y, m] = key.split('-').map(Number);
+  return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`;
+}
+
+/**
+ * `/?view=transactions&tx=<id>` — where a new-charge notification points —
+ * opens that charge's sheet, ready to categorize. It was made in the last day,
+ * so it is in this month or, just after the 1st, the one before.
+ */
+async function openLinkedCharge() {
+  const params = new URLSearchParams(window.location.search);
+  const id = params.get('tx');
+  if (!id) return;
+  // Off the address, so reloading the page does not open the sheet again.
+  params.delete('tx');
+  const rest = params.toString();
+  window.history.replaceState(null, '', `${window.location.pathname}${rest ? `?${rest}` : ''}${window.location.hash}`);
+
+  const month = crMonth(new Date());
+  try {
+    for (const key of [month, monthBefore(month)]) {
+      await loadMonth(key);
+      if (findCached(id)) { txEdit(id); return; }
+    }
+    toast('That charge is no longer in the app');
+  } catch (err) {
+    console.warn('[link]', err.message);
+  }
 }
 
 /**
@@ -159,6 +192,8 @@ async function boot() {
     showApp(null);
     wire();
     setView(firstView());
+    openLinkedCharge();
+    startLive();
     return;
   }
 
@@ -181,6 +216,11 @@ async function boot() {
   showApp(userOf(session));
   wire();
   setView(firstView());
+  openLinkedCharge();
+
+  // New charges appear by themselves: on a notification, on coming back to
+  // the app, and with a quick check each minute while it is on screen.
+  startLive();
 
   // A subscription the browser rotated on its own is re-sent, quietly.
   refreshPushSubscription();

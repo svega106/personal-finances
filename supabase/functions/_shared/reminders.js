@@ -11,7 +11,8 @@
  *   listCards()                credit-card account rows for everyone, app shape plus `userId`
  *   listSent(today)            reminders already recorded for cutoffs on or after today,
  *                              as { userId, cardKey, cutoffDate }
- *   listSubscriptions(userId)  that person's devices: { endpoint, p256dh, auth }
+ *   listSubscriptions(userId, kind)  that person's devices with `kind` switched on
+ *                              ('cutoffs' here): { endpoint, p256dh, auth }
  *   claim(entry)               record the reminder; false if it was already recorded
  *   release(entry)             take the record back when nothing could be delivered
  *   send(subscription, payload)  { ok } or { ok: false, gone, error }
@@ -19,6 +20,7 @@
  * @param {string} today  'YYYY-MM-DD', Costa Rica
  */
 import { dueReminders, sentKey, reminderText } from './cutoff.js';
+import { sendToDevices } from './push-delivery.js';
 
 export async function runReminders(deps, today) {
   const accounts = await deps.listCards();
@@ -28,7 +30,7 @@ export async function runReminders(deps, today) {
   const report = { today, due: due.length, sent: [], noDevice: [], failed: [], removedDevices: 0 };
 
   for (const entry of due) {
-    const devices = await deps.listSubscriptions(entry.userId);
+    const devices = await deps.listSubscriptions(entry.userId, 'cutoffs');
 
     // Not recorded: a reminder nobody could receive is still owed, and goes
     // out on the first run after a device is subscribed — if the cutoff has
@@ -43,6 +45,7 @@ export async function runReminders(deps, today) {
     if (!(await deps.claim(entry))) continue;
 
     const payload = {
+      kind: 'cutoff',
       ...reminderText(entry),
       // The same tag on every device, so a phone that is also sent it twice
       // shows one notification, replaced rather than stacked.
@@ -50,22 +53,11 @@ export async function runReminders(deps, today) {
       url: '/?view=accounts',
     };
 
-    let delivered = 0;
-    for (const device of devices) {
-      const r = await deps.send(device, payload);
-      if (r.ok) {
-        delivered += 1;
-      } else if (r.gone) {
-        // The browser unsubscribed or the app was uninstalled. Keeping the
-        // row would fail again every day.
-        await deps.removeSubscription(device.endpoint);
-        report.removedDevices += 1;
-      } else {
-        report.failed.push({ card: entry.name, error: r.error });
-      }
-    }
+    const r = await sendToDevices(deps, devices, payload);
+    report.removedDevices += r.gone.length;
+    for (const error of r.errors) report.failed.push({ card: entry.name, error });
 
-    if (delivered) {
+    if (r.delivered) {
       report.sent.push(entry.name);
     } else {
       // Nothing arrived anywhere. Taking the record back means the next run

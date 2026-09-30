@@ -37,6 +37,10 @@ against a stubbed database:
 cd sync/edge-test && deno run --allow-net --allow-env --allow-read handler.test.ts
 ```
 
+Without Deno installed, `npx -y deno run --node-modules-dir=none …` does the
+same (the flag keeps it off the app's `node_modules`). web-push is stubbed as
+well, so the test also covers the notification a new charge sends.
+
 Browser-level checks live in `tools/` and need the app running:
 
 ```
@@ -252,7 +256,7 @@ with their own label, and appear under each account they touch.
 to be reminded. Both currency halves of a card share them. The dashboard lists
 every cutoff, soonest first, marked once inside its card's window.
 
-Reminders are Web Push to each device switched on in Settings. Which cards are
+Reminders are Web Push to each device with them switched on in Settings → Notifications. Which cards are
 due, and whether a reminder already went out, is decided in
 `supabase/functions/_shared/cutoff.js` and `reminders.js` — the same module
 the dashboard uses, under node tests. A reminder is recorded before it is
@@ -295,7 +299,7 @@ In this order — the app reads the new columns, so it breaks if deployed first.
    sent.
 
 5. **Deploy the app** (push to `main`), then on each device: Settings →
-   Cutoff reminders → Turn on. On iPhone and iPad this works only in the app
+   Notifications → Turn on. On iPhone and iPad this works only in the app
    added to the Home Screen, not in a Safari tab — the switch says so.
 
 To try a reminder without waiting for a cutoff, post a day to the function:
@@ -306,6 +310,72 @@ curl -X POST https://zemxydjuuugzumxjrpqf.supabase.co/functions/v1/send-cutoff-r
 ```
 
 That records the reminder as sent, like a real run would.
+
+
+## A notification for each new charge
+
+When the sync brings in a charge, the ingest function announces it on every
+device with notifications on — the same Web Push, service worker and VAPID
+keys as the cutoff reminders:
+
+```
+Apps Script (15 min) ──▶ ingest-email ──▶ insert ──▶ the rows actually inserted ──▶ web push ──▶ sw.js
+```
+
+- **Only what is new.** The insert ignores duplicates and returns only the
+  rows it created, so a charge is announced once however often its email is
+  seen. A charge posted more than a day ago is history being re-imported (a
+  resync after a parser fix), and is not announced at all.
+- **One each, or a summary.** Up to three at once arrive one by one — "₡38,500
+  at Auto Mercado", with the card and its category, or "Tap to categorize".
+  More than that arrive as one "5 new charges". Tapping one opens that charge
+  in the app, ready to categorize (`/?view=transactions&tx=<id>`).
+- **Never at the import's expense.** Sending runs after the charges are saved,
+  cannot throw, and gives up after 15 seconds. The response carries a
+  `notified` report, and the Apps Script log adds "N notification(s) sent".
+- **Per device.** Settings → Notifications has a switch for new charges and
+  one for cutoff reminders (`push_subscriptions.notify_charges` /
+  `notify_cutoffs`, 0012), so a phone can have both and a laptop neither.
+
+Decided in `supabase/functions/_shared/charge-alerts.js`, under node tests;
+the edge function is wiring.
+
+### The screen follows by itself
+
+`app/src/live.js` reloads the data — not the page — when:
+
+- a new-charge notification reaches the device: the service worker tells any
+  open window;
+- the ledger changed, checked once a minute while the app is on screen, by
+  one indexed row (the count and the newest `updated_at`);
+- the app comes back after two minutes or more in the background: then
+  everything is reloaded, budget included, as another device may have
+  changed it.
+
+It never reloads under someone: with a sheet open or the cursor in a field,
+it waits and catches up seconds after they finish.
+
+### Setting it up
+
+1. **Migrate.** SQL Editor → paste `supabase/migrations/0012_charge_notifications.sql`
+   → Run. Safe to run twice. Before the function and the app: both read the
+   new columns.
+2. **Deploy both functions** — ingest-email sends the alerts, and
+   send-cutoff-reminders now respects each device's switch:
+
+   ```
+   npx supabase functions deploy ingest-email --no-verify-jwt
+   npx supabase functions deploy send-cutoff-reminders --no-verify-jwt
+   ```
+
+3. **Deploy the app** (push to `main`). Devices already switched on get both
+   kinds; nothing to redo on the phone.
+4. *(Optional)* Paste the new `sync/apps-script/Code.gs` over the old one for
+   the "notification(s) sent" line in the sync's log. The sync works the same
+   without it.
+
+Charges arrive as fast as the sync runs. For quicker alerts, set the
+`syncNow` trigger to every 5 minutes instead of 15.
 
 
 ## Installing it on a phone

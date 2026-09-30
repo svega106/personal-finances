@@ -44,8 +44,10 @@ parameter.
 | `src/tx-actions.js` | Its edit sheet and filters |
 | `src/money-moves.js` | Transfers to a card and income: who takes part, validation, the row written |
 | `src/money-actions.js` | Their sheets, and the phone's + chooser |
-| `src/push.js` | Reminder permission and subscription on this device, and every way it can fail |
-| `src/push-config.js` | The public VAPID key reminders are sent with |
+| `src/push.js` | Notification permission, subscription and kinds on this device, and every way it can fail |
+| `src/push-config.js` | The public VAPID key notifications are sent with |
+| `src/live.js` | Reloading by itself: a new-charge notification, a changed ledger, coming back to the app |
+| `src/live-core.js` | When to reload, and when to wait for a sheet to close — no DOM, under test |
 | `src/main.js` | Bootstrap, DOM wiring, `window.*` bindings |
 
 ## How saving works

@@ -172,7 +172,8 @@ function run_(mode, since, advance) {
   // watermark does not move past messages that were never offered.
   var CHUNK = 100;
   var totals = { imported: 0, duplicates: 0, unmatchedAccount: 0,
-                 repaired: 0, alreadyCorrect: 0 };
+                 repaired: 0, alreadyCorrect: 0, notified: 0 };
+  var notifyProblem = '';
   var failed = [];
   var changed = [];
 
@@ -208,6 +209,12 @@ function run_(mode, since, advance) {
     totals.unmatchedAccount += (r.unmatchedAccount || 0);
     totals.repaired += (r.repaired || 0);
     totals.alreadyCorrect += (r.alreadyCorrect || 0);
+    // New charges are announced by the ingest function itself; this only
+    // reports it. `skipped` says why nothing could be sent at all.
+    if (r.notified) {
+      totals.notified += (r.notified.delivered || 0);
+      notifyProblem = r.notified.skipped || r.notified.error || notifyProblem;
+    }
     changed = changed.concat(r.changed || []);
     failed = failed.concat((r.skipped || []).filter(function (x) {
       return x.reason === 'parse-error';
@@ -234,6 +241,8 @@ function run_(mode, since, advance) {
     if (totals.unmatchedAccount) {
       summary += ', ' + totals.unmatchedAccount + ' with no matching card';
     }
+    if (totals.notified) summary += ', ' + totals.notified + ' notification(s) sent';
+    if (notifyProblem) summary += '\n    notifications not sent: ' + notifyProblem;
   }
   if (failed.length) {
     summary += '\n*** ' + failed.length + ' COULD NOT BE PARSED — those charges are not in the app:';
