@@ -6,7 +6,7 @@
  * Writes go nowhere. That is the point: nothing here should be mistaken for
  * persistence.
  */
-import { crDay, crStamp, snapshotCut } from './cr-date.js';
+import { crDay, crStamp, snapshotCut, snapshotDay } from './cr-date.js';
 export function createMemoryRepo(seed = {}) {
   const store = {
     months: structuredClone(seed.months ?? {}),
@@ -88,9 +88,12 @@ export function createMemoryRepo(seed = {}) {
       // Mirrors the `account_balances` view: the last snapshot, plus every
       // transaction posted after the instant it stands for (0013).
       return store.accounts.map((a) => {
+        // The latest day wins — never a day after it was entered — and on the
+        // same day, the one entered last (0015).
+        const key = (s) => `${snapshotDay(s)}|${s.recordedAt ?? ''}`;
         const snaps = store.snapshots
           .filter((s) => s.accountId === a.id)
-          .sort((x, y) => (x.asOf < y.asOf ? 1 : -1));
+          .sort((x, y) => (key(x) < key(y) ? 1 : -1));
         const last = snaps[0] ?? null;
         const cut = last ? snapshotCut(last) : null;
         // A transfer's arriving side may carry its own amount, in this
@@ -122,7 +125,7 @@ export function createMemoryRepo(seed = {}) {
           label: a.label,
           type: a.type,
           currency: a.currency,
-          snapshotDate: last?.asOf ?? null,
+          snapshotDate: last ? snapshotDay(last) : null,
           snapshotCut: cut,
           snapshotBalance: last ? last.balance : null,
           currentBalance: (last ? last.balance : 0) + moved,

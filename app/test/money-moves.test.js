@@ -321,3 +321,25 @@ test('re-entering a balance later the same day moves the moment it stands for', 
   assert.ok(b.snapshotCut, 'a recorded moment');
   assert.ok(Date.parse(b.snapshotCut) <= Date.now() && Date.now() - Date.parse(b.snapshotCut) < 5000);
 });
+
+test('a balance dated ahead of when it was entered stands for the moment it was entered', async () => {
+  // Ahorros Colones as it was: saved "as of Oct 1" at 10:36pm on Sep 30, and
+  // again "as of Sep 30" at 11:06pm. Entries on Oct 1 did not move it.
+  const repo = createMemoryRepo({
+    accounts: [AHORROS],
+    snapshots: [
+      { id: 'a', accountId: 's-crc', asOf: '2026-10-01', balance: 870040.15, currency: 'CRC', recordedAt: '2026-09-30T22:36:00-06:00' },
+      { id: 'b', accountId: 's-crc', asOf: '2026-09-30', balance: 870040.15, currency: 'CRC', recordedAt: '2026-09-30T23:06:00-06:00' },
+    ],
+    transactions: [
+      spend('before', '2026-09-30T22:11:00-06:00', 22800),    // before it was entered: in the figure
+      spend('w1', '2026-10-01T10:17:00-06:00', 21000),
+      spend('w2', '2026-10-01T10:49:00-06:00', 10000),
+      spend('big', '2026-10-01T11:03:00-06:00', 600000),
+    ],
+  });
+  const [b] = await repo.listAccountBalances();
+  assert.equal(b.snapshotDate, '2026-09-30', 'never a day that had not happened');
+  assert.equal(b.snapshotCut, '2026-09-30T23:06:00-06:00', 'the one entered last that day');
+  assert.equal(Math.round(b.currentBalance * 100) / 100, 239040.15);
+});

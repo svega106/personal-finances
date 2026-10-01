@@ -18,7 +18,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   crDay, crMonth, crDayLabel, crTimeLabel, crNoon, CR_OFFSET,
-  crClock, crStamp, crAt, pickedInstant, crDayAfter, snapshotCut,
+  crClock, crStamp, crAt, pickedInstant, crDayAfter, snapshotCut, snapshotDay,
 } from '../src/cr-date.js';
 
 /* ------------------------------------------------------------ the helpers */
@@ -108,6 +108,13 @@ test('a balance entered today stands for that moment; a backdated one for the en
   assert.equal(snapshotCut({ asOf: '2026-09-30', recordedAt: typed }), typed);
   assert.equal(snapshotCut({ asOf: '2026-09-28', recordedAt: typed }), `2026-09-29T00:00:00${CR_OFFSET}`);
   assert.equal(snapshotCut({ asOf: '2026-09-28' }), `2026-09-29T00:00:00${CR_OFFSET}`, 'no record of when: end of day');
+});
+
+test('a balance dated ahead is as of the day it was entered, and that moment', () => {
+  const typed = '2026-09-30T22:36:00-06:00';
+  assert.equal(snapshotDay({ asOf: '2026-10-01', recordedAt: typed }), '2026-09-30');
+  assert.equal(snapshotCut({ asOf: '2026-10-01', recordedAt: typed }), typed);
+  assert.equal(snapshotDay({ asOf: '2026-09-28', recordedAt: typed }), '2026-09-28', 'backdated stays backdated');
 });
 
 /* ------------------------------------------------ and the guard on the source */

@@ -72,7 +72,7 @@ export function acctUpdate(accountId) {
 
     <div class="tx-2col">
       <div class="field"><label for="bal_date">As of</label>
-        <input class="inp" id="bal_date" type="date" value="${today()}"></div>
+        <input class="inp" id="bal_date" type="date" value="${today()}" max="${today()}"></div>
       <div class="field"><label for="bal_note">Note <span class="faint">(optional)</span></label>
         <input class="inp" id="bal_note" placeholder="e.g. after the bonus"></div>
     </div>
@@ -94,6 +94,9 @@ export function acctUpdate(accountId) {
     // Owed on a card is a negative balance.
     const balance = isCard ? -entered : entered;
     const asOf = val('bal_date') || today();
+    // What an account holds tomorrow is not known today. Dated ahead, a
+    // balance would swallow everything entered until that day.
+    if (asOf > today()) { toast('A balance can only be as of today or an earlier day'); return; }
 
     const btn = document.getElementById('bal_save');
     btn.disabled = true; btn.textContent = 'Saving…';

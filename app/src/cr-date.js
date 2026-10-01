@@ -146,13 +146,25 @@ export function crDayStart(day) {
 }
 
 /**
- * The instant a recorded balance stands for: the moment it was entered, when
- * it is dated the day it was entered — "what the account holds right now" —
- * or the end of its day when it was dated another day. Anything after this
- * counts on top of it; anything before is already in it. Mirrors
- * `account_balances.snapshot_cut` (0013).
+ * The day a recorded balance is really as of. It cannot be a day that had not
+ * happened when it was entered: dated ahead, it is as of the day it was
+ * entered (0015).
  */
-export function snapshotCut({ asOf, recordedAt }) {
-  if (recordedAt && crDay(recordedAt) === asOf) return recordedAt;
-  return crDayStart(crDayAfter(asOf));
+export function snapshotDay({ asOf, recordedAt }) {
+  if (!recordedAt) return asOf;
+  const entered = crDay(recordedAt);
+  return asOf > entered ? entered : asOf;
+}
+
+/**
+ * The instant a recorded balance stands for: the moment it was entered, when
+ * it is as of the day it was entered — "what the account holds right now" —
+ * or the end of its day when it was backdated. Anything after this counts on
+ * top of it; anything before is already in it. Mirrors
+ * `account_balances.snapshot_cut` (0013, 0015).
+ */
+export function snapshotCut(snap) {
+  const day = snapshotDay(snap);
+  if (snap.recordedAt && crDay(snap.recordedAt) === day) return snap.recordedAt;
+  return crDayStart(crDayAfter(day));
 }

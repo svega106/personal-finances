@@ -266,6 +266,13 @@ on every save, so re-entering today's balance moves the moment too, and the
 view exposes the instant as `snapshot_cut`. Every sheet — expense, transfer,
 income — says when an entry falls before it and so will not move the balance.
 
+A balance can never be as of a day that had not happened when it was entered
+(0015): the sheet stops at today, and one already dated ahead is read as of
+the moment it was entered. Ahorros Colones was saved "as of Oct 1" on the
+evening of Sep 30; read as the end of Oct 1, it swallowed every entry made on
+Oct 1. Among several balances, the latest day wins and, on the same day, the
+one entered last.
+
 It used to be a day, compared in UTC: an expense entered the afternoon a
 balance was recorded never moved it, while an evening charge — already the
 next day in UTC — did. That, and manual entries all stamped 12:00, was why an
