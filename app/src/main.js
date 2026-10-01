@@ -10,6 +10,7 @@ import {
   clearMonth, goalModal, saveGoal, delGoal, addToGoal, confirmAddGoal, updAlloc,
   liveAlloc, setAlloc, exportData, importData, resetAll, closeModal, updCarryover,
   useCarryover, gotoMonth, stepYear, setTheme, openMore, setUser, setPush, pushTest, setPushKind,
+  txTypeRename, txTypeSet, txTypeAdd, txTypeRemove,
 } from './app.js';
 import { openTransfer, openIncome, moveDelete, openAddChooser } from './money-actions.js';
 import { refreshPushSubscription } from './push.js';
@@ -17,7 +18,7 @@ import { txSetFilter, txClearFilters, txEdit, txSave, txDelete, txRateModal } fr
 import { startLive } from './live.js';
 import {
   acctUpdate, acctAdd, acctEdit, acctArchive, acctPickWork, acctSelectAllWork,
-  acctSettleOne, acctSettleSelected, acctUnsettle,
+  acctSettleOne, acctSettleSelected, acctUnsettle, acctRepaySelected,
 } from './accounts-actions.js';
 import { loadReference, loadMonth, findCached } from './tx.js';
 import { updateNavBadge } from './views-tx.js';
@@ -90,7 +91,8 @@ function wire() {
     openTransfer, openIncome, moveDelete, openAddChooser,
     txSetFilter, txClearFilters, txEdit, txSave, txDelete, txRateModal,
     acctUpdate, acctAdd, acctEdit, acctArchive, acctPickWork, acctSelectAllWork,
-    acctSettleOne, acctSettleSelected, acctUnsettle,
+    acctSettleOne, acctSettleSelected, acctUnsettle, acctRepaySelected,
+    txTypeRename, txTypeSet, txTypeAdd, txTypeRemove,
   });
 }
 

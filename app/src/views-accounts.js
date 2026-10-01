@@ -18,6 +18,7 @@ import { workFor, splitWork, totalByCurrency, isReimbursed, isCompanyPaid } from
 import { icon, accountIcon, cardThumb, merchantIcon, bankOf, networkMark, cardArt } from './icons.js';
 import { crDay, crShortDate, crTimeLabel } from './cr-date.js';
 import { upcomingCutoffs } from '../../supabase/functions/_shared/cutoff.js';
+import { txTypes, typeOf } from './tx-types.js';
 
 /**
  * Lets the actions module force a repaint once a settle has landed. Declared
@@ -356,15 +357,22 @@ function cardsSection(list, monthKey) {
  * used.
  */
 function workSection() {
+  // Every type set to be paid back in Settings, not only Work.
+  const owedTypes = txTypes().filter((t) => t.reimbursable);
+  if (!owedTypes.length) return '';
   const { rows, loading } = workFor(rerender);
+  const names = owedTypes.map((t) => t.label);
+  const title = owedTypes.length === 1 && owedTypes[0].key === 'work'
+    ? `${esc(owedTypes[0].label)} — owed to you` : 'Owed to you';
   const head = (extra = '') => `
     <div class="section-head">
-      <h3>Work — owed to you</h3>
+      <h3>${title}</h3>
       ${extra}
     </div>
-    <p class="section-note lead">Work spending you paid for yourself, on any card and from any month —
-      reimbursement usually arrives later than the charge. Mark a charge as Work on the
-      Activity tab and it appears here.</p>`;
+    <p class="section-note lead">Money you paid for yourself and expect back
+      (${esc(names.join(', '))}), from any card or account and any month. When it comes back,
+      select what it covers and add it as income — the account goes back up and the charges
+      leave this list.</p>`;
 
   if (loading) {
     return `<section class="section">${head()}<div class="list">${skelRows(2)}</div></section>`;
@@ -391,15 +399,19 @@ function workSection() {
                  ${allSelected(owed) ? 'checked' : ''}>
           <span>${selectedCount() ? `${selectedCount()} selected` : 'Select all'}</span>
         </label>
-        <button class="btn sm" ${selectedCount() ? '' : 'disabled'}
-                onclick="acctSettleSelected()">${icon('check')}Mark reimbursed</button>
+        <span class="work-actions">
+          <button class="btn soft sm" ${selectedCount() ? '' : 'disabled'}
+                  onclick="acctRepaySelected()">${icon('income')}Add as income</button>
+          <button class="btn sm" ${selectedCount() ? '' : 'disabled'}
+                  onclick="acctSettleSelected()">${icon('check')}Mark reimbursed</button>
+        </span>
       </div>
       ${owed.map(workRow).join('')}
     </div>` : `
     <div class="card empty" style="padding:28px 20px">
       <div class="empty-ic" style="color:var(--pos);background:color-mix(in srgb,var(--pos-mark) 14%,transparent)">${icon('check-circle')}</div>
       <h3>Nothing owed to you</h3>
-      <p style="margin-bottom:0">Work expenses you pay for yourself show up here.</p>
+      <p style="margin-bottom:0">Charges of a type paid back to you show up here until they are.</p>
     </div>`}
 
     ${settled.length ? `
@@ -414,9 +426,9 @@ function workSection() {
     <details class="work-settled">
       <summary>${icon('chevron-right')}${companyPaid.length} paid by the company</summary>
       <p class="section-note" style="margin:0 0 10px">
-        Charges on the BNCR card. The company pays that card directly, so these
-        never come out of your pocket and there is nothing to claim back. They
-        are kept out of your personal spending and listed here for reference.
+        Charges on the company's own card, such as the BNCR one. The company pays
+        that card directly, so these never come out of your pocket and there is
+        nothing to claim back. They never count as your spending.
       </p>
       <div class="list">
         ${companyPaid.slice(0, 40).map(workRow).join('')}
@@ -442,7 +454,7 @@ function workRow(t) {
     <div class="item-main">
       <div class="item-title"><span class="t">${esc(name)}</span></div>
       <div class="item-sub">
-        ${esc(when)}${acct ? ` · ${esc(acct.label)}` : ''}${t.reimbursement?.on ? ` · reimbursed ${esc(dayLabel(t.reimbursement.on))}` : ''}
+        ${esc(when)}${acct ? ` · ${esc(acct.label)}` : ''}${typeOf(t).key === 'work' ? '' : ` · ${esc(typeOf(t).label)}`}${t.reimbursement?.on ? ` · reimbursed ${esc(dayLabel(t.reimbursement.on))}` : ''}
       </div>
     </div>
     <div class="item-amt">${fmt(t.amount, t.currency)}</div>

@@ -15,6 +15,7 @@ import { afterLedgerChange } from './refresh.js';
 import { txFilters } from './views-tx.js';
 import { icon } from './icons.js';
 import { openTransfer, openIncome, coveredNote } from './money-actions.js';
+import { txTypes, typeOf } from './tx-types.js';
 
 let editing = null;
 
@@ -100,10 +101,9 @@ function sheet(t) {
           <option value="">Uncategorized</option>
           ${CATS.map(([k, l]) => `<option value="${k}"${t.cat === k ? ' selected' : ''}>${l}</option>`).join('')}
         </select></div>
-      <div class="field"><label for="tx_scope">Scope</label>
+      <div class="field"><label for="tx_scope">Type</label>
         <select class="inp" id="tx_scope">
-          <option value="personal"${t.scope === 'personal' ? ' selected' : ''}>Personal</option>
-          <option value="work"${t.scope === 'work' ? ' selected' : ''}>Work</option>
+          ${txTypes().map((ty) => `<option value="${esc(ty.key)}"${typeOf(t).key === ty.key ? ' selected' : ''}>${esc(ty.label)}${ty.spending ? '' : ' · not spending'}</option>`).join('')}
         </select></div>
     </div>
 
@@ -248,9 +248,9 @@ export async function txSave() {
     reviewed: true,
   };
 
-  // Marking something as work only makes it reimbursable when the money was
-  // yours: a charge on the company's own card is theirs to settle.
-  if (t.scope === 'work') {
+  // A type paid back to you makes the charge owed — but only when the money
+  // was yours: a charge on the company's own card is theirs to settle.
+  if (typeOf(t).reimbursable) {
     if (!t.reimbursement) t.reimbursement = initialReimbursement(accountById(t.accountId));
   } else {
     t.reimbursement = null;

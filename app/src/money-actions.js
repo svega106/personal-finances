@@ -9,11 +9,13 @@
 import { openModal, closeModal, toast, getActiveView } from './app.js';
 import { getRepo } from './repo.js';
 import { getAccounts, accountById, saveTransaction, removeTransaction } from './tx.js';
-import { findRow, esc, flashRow } from './views-tx.js';
+import { findRow, esc, flashRow, dayKey, dayLabel } from './views-tx.js';
 import { money } from './state.js';
 import { crDay, crMonth, crShortDate, crClock, crStamp, crTimeLabel, pickedInstant } from './cr-date.js';
 import { afterLedgerChange } from './refresh.js';
 import { icon } from './icons.js';
+import { loadWork, splitWork, reimbursementChanges } from './work.js';
+import { typeOf } from './tx-types.js';
 import {
   transferSources, transferDestinations, incomeAccounts,
   validateTransfer, validateIncome, transferRow, incomeRow, crossCurrency,
@@ -232,10 +234,24 @@ export async function openTransfer(id) {
 
 /* ------------------------------------------------------------ Add income */
 
-export async function openIncome(id) {
+/**
+ * `covers` preselects charges owed to you that this income pays back — how
+ * the Owed to you list on Accounts opens it.
+ */
+export async function openIncome(id, { covers: preselect = [] } = {}) {
   const openedAt = crStamp();
   const existing = id ? findRow(id) : null;
   if (id && !existing) { toast('Income not found'); return; }
+
+  // Money owed back to you that this could be. A charge this income already
+  // paid back is offered too, ticked, so it can be taken off again.
+  const before = existing?.reimbursement?.covers ?? [];
+  let owedRows = [];
+  try {
+    const { owed, settled } = splitWork(await loadWork({ force: true }));
+    owedRows = [...owed, ...settled.filter((t) => before.includes(t.id))];
+  } catch { owedRows = []; }
+  const ticked = new Set(existing ? before : preselect);
 
   let balances;
   try {
@@ -275,6 +291,24 @@ export async function openIncome(id) {
     </div>
     <p class="move-hint" id="in_hint" aria-live="polite"></p>
 
+    ${owedRows.length ? `
+    <div class="repay">
+      <label class="check"><input type="checkbox" id="in_repay"${ticked.size ? ' checked' : ''}>
+        It pays back money owed to me</label>
+      <div class="repay-list" id="in_repay_list"${ticked.size ? '' : ' hidden'}>
+        ${owedRows.map((t) => {
+          const acct = accountById(t.accountId);
+          const type = typeOf(t);
+          return `<label class="repay-row">
+            <input type="checkbox" class="in-cover" value="${esc(t.id)}"${ticked.has(t.id) ? ' checked' : ''}>
+            <span class="repay-main"><b>${esc(t.merchant || t.merchantRaw || '(no merchant)')}</b>
+              <span>${esc(dayLabel(dayKey(t.postedAt)))}${acct ? ` · ${esc(acct.label)}` : ''}${type.key === 'work' ? '' : ` · ${esc(type.label)}`}</span></span>
+            <b class="repay-amt">${fmt(t.amount, t.currency)}</b>
+          </label>`;
+        }).join('')}
+      </div>
+    </div>` : ''}
+
     <div class="field"><label for="in_from">From</label>
       <input class="inp" id="in_from" value="${esc(existing?.merchant ?? '')}" placeholder="e.g. Paycheck" autocomplete="off"></div>
     ${whenFields('in', existing?.postedAt ?? openedAt)}
@@ -295,6 +329,25 @@ export async function openIncome(id) {
     at: pickedInstant(existing?.postedAt ?? openedAt, val('in_date'), val('in_time')),
   });
 
+  // The charges ticked, if the income is marked as paying something back.
+  const covers = () => (document.getElementById('in_repay')?.checked
+    ? [...document.querySelectorAll('.in-cover:checked')].map((x) => x.value) : []);
+
+  // Ticking charges fills in what they add up to, when they are all in the
+  // account's currency — what arrives is usually exactly that. It stays
+  // editable: a reimbursement can come back short, or in one sum for more.
+  const fillFromCovers = () => {
+    const acct = accountById(val('in_account'));
+    const picked = owedRows.filter((t) => covers().includes(t.id));
+    if (!picked.length || !acct) return;
+    if (picked.every((t) => t.currency === acct.currency)) {
+      const sum = picked.reduce((n, t) => n + t.amount, 0);
+      document.getElementById('in_amount').value = String(Math.round(sum * 100) / 100);
+    }
+    const from = document.getElementById('in_from');
+    if (from && !from.value.trim()) from.value = 'Reimbursement';
+  };
+
   const hint = () => {
     const f = read();
     document.getElementById('in_cur').textContent = symbol(f.account?.currency);
@@ -307,6 +360,13 @@ export async function openIncome(id) {
       lines.push(`${esc(f.account.label)}: ${fmt(b.currentBalance - giveBack, f.account.currency)} → ${fmt(b.currentBalance - giveBack + f.amount, f.account.currency)}`);
     }
     if (covered) lines.push(covered);
+    const paying = owedRows.filter((t) => covers().includes(t.id));
+    if (paying.length) {
+      const owedSum = {};
+      for (const t of paying) owedSum[t.currency] = (owedSum[t.currency] || 0) + t.amount;
+      const owedText = Object.entries(owedSum).map(([c, v]) => fmt(v, c)).join(' + ');
+      lines.push(`Pays back ${paying.length} charge${paying.length === 1 ? '' : 's'} (${owedText}) — they leave Owed to you.`);
+    }
     el.className = 'move-hint';
     el.innerHTML = lines.map((l) => `<span>${l}</span>`).join('');
   };
@@ -314,25 +374,47 @@ export async function openIncome(id) {
     document.getElementById(id2)?.addEventListener('input', hint);
     document.getElementById(id2)?.addEventListener('change', hint);
   }
+  const repay = document.getElementById('in_repay');
+  repay?.addEventListener('change', () => {
+    document.getElementById('in_repay_list').hidden = !repay.checked;
+    fillFromCovers();
+    hint();
+  });
+  document.querySelectorAll('.in-cover').forEach((x) => x.addEventListener('change', () => { fillFromCovers(); hint(); }));
+  if (!existing && ticked.size) fillFromCovers();
   hint();
 
   document.getElementById('in_save')?.addEventListener('click', async () => {
     const f = read();
     const err = validateIncome(f);
     if (err) { toast(err); return; }
-    const row = incomeRow({ ...f, from: val('in_from'), note: val('in_note'), existing });
-    await save(row, 'in_save', existing ? 'Income updated' : `${fmt(f.amount, f.account.currency)} added to ${f.account.label}`);
+    const row = incomeRow({ ...f, openedAt, from: val('in_from'), note: val('in_note'), existing });
+    // The link both ways: the income lists what it paid back, and each of
+    // those charges, which income settled it.
+    const after = covers();
+    row.reimbursement = after.length ? { covers: after } : null;
+    const paid = after.length ? ` · ${after.length} charge${after.length === 1 ? '' : 's'} paid back` : '';
+    await save(row, 'in_save', existing ? `Income updated${paid}` : `${fmt(f.amount, f.account.currency)} added to ${f.account.label}${paid}`,
+      async (saved) => {
+        const changes = reimbursementChanges({
+          incomeId: saved.id, on: crDay(saved.postedAt), before, after, rows: owedRows,
+        });
+        for (const t of [...changes.settle, ...changes.unsettle]) await saveTransaction(t);
+      });
   });
 }
 
 /* ------------------------------------------------------------- shared */
 
-async function save(row, buttonId, message) {
+async function save(row, buttonId, message, then = null) {
   const btn = document.getElementById(buttonId);
   const label = btn?.textContent;
   if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
   try {
     const saved = await saveTransaction(row);
+    // Anything that needs the saved row's id, such as settling the charges a
+    // reimbursement pays back.
+    if (then) await then(saved ?? row);
     closeModal();
     if (getActiveView() === 'transactions') flashRow(saved?.id ?? row.id);
     // Both balances are derived from the ledger: Accounts must re-read.
@@ -349,8 +431,17 @@ export async function moveDelete(id) {
   const t = findRow(id);
   if (!t) { toast('Not found'); return; }
   const what = t.kind === 'transfer' ? 'this transfer' : 'this income';
-  if (!confirm(`Delete ${what}? ${t.kind === 'transfer' ? 'Both balances go back to how they were.' : 'The savings balance goes back down.'}`)) return;
+  const paidBack = t.kind === 'income' ? (t.reimbursement?.covers ?? []) : [];
+  const owedAgain = paidBack.length
+    ? ` The ${paidBack.length} charge${paidBack.length === 1 ? '' : 's'} it paid back will be owed to you again.` : '';
+  if (!confirm(`Delete ${what}? ${t.kind === 'transfer' ? 'Both balances go back to how they were.' : 'The savings balance goes back down.'}${owedAgain}`)) return;
   try {
+    if (paidBack.length) {
+      const { unsettle } = reimbursementChanges({
+        incomeId: t.id, before: paidBack, after: [], rows: await loadWork({ force: true }),
+      });
+      for (const x of unsettle) await saveTransaction(x);
+    }
     await removeTransaction(t);
     closeModal();
     await afterLedgerChange(crMonth(t.postedAt));

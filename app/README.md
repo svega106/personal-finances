@@ -43,6 +43,7 @@ parameter.
 | `src/views-tx.js` | The transactions view |
 | `src/tx-actions.js` | Its edit sheet and filters |
 | `src/money-moves.js` | Transfers to a card and income: who takes part, validation, the row written |
+| `src/tx-types.js` | Transaction types: which count as spending, which are paid back, editing them |
 | `src/money-actions.js` | Their sheets, and the phone's + chooser |
 | `src/push.js` | Notification permission, subscription and kinds on this device, and every way it can fail |
 | `src/push-config.js` | The public VAPID key notifications are sent with |

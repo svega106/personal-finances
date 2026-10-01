@@ -1,5 +1,6 @@
 /**
- * Work charges and getting the money back.
+ * Money owed back to you — work charges, and any other type set to be paid
+ * back in Settings — and getting it back.
  *
  * Deliberately not scoped to the month on screen. A September charge is
  * usually reimbursed in October, so a month-bound list would mean navigating
@@ -9,6 +10,7 @@
 import { getRepo } from './repo.js';
 import { accountById } from './tx.js';
 import { crMonth, CR_OFFSET } from './cr-date.js';
+import { owedTypeKeys } from './tx-types.js';
 
 /** Far enough back to cover a slow reimbursement, short enough to stay small. */
 const WINDOW_MONTHS = 18;
@@ -81,7 +83,9 @@ export function invalidateWork() { charges = null; }
 
 export async function loadWork({ force = false } = {}) {
   if (charges && !force) return charges;
-  charges = await getRepo().listWorkCharges({ since: windowStart() });
+  // Every type whose charges are owed back, not only Work.
+  const scopes = owedTypeKeys();
+  charges = scopes.length ? await getRepo().listWorkCharges({ since: windowStart(), scopes }) : [];
   return charges;
 }
 
@@ -108,9 +112,36 @@ export function initialReimbursement(account) {
   return account?.scope === 'work' ? null : { status: 'pending' };
 }
 
-/** Settling is just a date. Undo removes the record rather than flagging it. */
-export function settle(t, on) {
-  return { ...t, reimbursement: { status: 'reimbursed', on } };
+/**
+ * Settling is a date — and, when the money was recorded as income, which
+ * income brought it back. Undo removes the record rather than flagging it.
+ */
+export function settle(t, on, by = null) {
+  return { ...t, reimbursement: { status: 'reimbursed', on, ...(by ? { by } : {}) } };
+}
+
+/**
+ * What saving a reimbursement income does to the charges it pays back.
+ *
+ * `before` is what the income covered when the sheet opened, `after` what is
+ * ticked now. Newly ticked charges are settled by it; ones it no longer
+ * covers go back to owed — but only if it was this income that settled them,
+ * never a charge marked reimbursed some other way.
+ *
+ * @returns {{ settle: object[], unsettle: object[] }}
+ */
+export function reimbursementChanges({ incomeId, on, before = [], after = [], rows = [] }) {
+  const byId = new Map(rows.map((t) => [t.id, t]));
+  const was = new Set(before);
+  const now = new Set(after);
+  return {
+    settle: [...now].map((id) => byId.get(id)).filter(Boolean)
+      .filter((t) => !(isReimbursed(t) && t.reimbursement?.by === incomeId && t.reimbursement?.on === on))
+      .map((t) => settle(t, on, incomeId)),
+    unsettle: [...was].filter((id) => !now.has(id)).map((id) => byId.get(id)).filter(Boolean)
+      .filter((t) => !incomeId || t.reimbursement?.by === incomeId)
+      .map(unsettle),
+  };
 }
 
 export function unsettle(t) {

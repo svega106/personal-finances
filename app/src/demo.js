@@ -8,7 +8,7 @@
  * always has something in it.
  */
 import { createMemoryRepo } from './memory-repo.js';
-import { crDay, crMonth, CR_OFFSET } from './cr-date.js';
+import { crDay, crMonth, crDayStart, CR_OFFSET } from './cr-date.js';
 import { shiftMonth } from './state.js';
 
 const card = (id, label, issuer, brand, last4, currency, extra = {}) => ({
@@ -195,11 +195,13 @@ export function installDemoRepo() {
     rules: [],
     fxRates: [{ month: prev, currency: 'USD', rate: 505.4 }],
     transactions: [...build(THIS_MONTH, month, { upTo: today }), ...build(LAST_MONTH, prev)],
+    // Balances as the month opened: entered at the very start of the 1st, so
+    // everything since counts on top — on the 1st itself too.
     snapshots: [
-      { id: 'sn1', accountId: 's-ahorros', asOf: `${month}-01`, balance: 2450000, currency: 'CRC', note: null },
+      { id: 'sn1', accountId: 's-ahorros', asOf: `${month}-01`, recordedAt: crDayStart(`${month}-01`), balance: 2450000, currency: 'CRC', note: null },
       { id: 'sn2', accountId: 's-ahorros-usd', asOf: `${shiftMonth(month, -2)}-28`, balance: 3200, currency: 'USD', note: null },
-      { id: 'sn3', accountId: 'i-fondo', asOf: `${month}-01`, balance: 1850000, currency: 'CRC', note: null },
-      { id: 'sn4', accountId: 'a-cash', asOf: `${month}-01`, balance: 45000, currency: 'CRC', note: null },
+      { id: 'sn3', accountId: 'i-fondo', asOf: `${month}-01`, recordedAt: crDayStart(`${month}-01`), balance: 1850000, currency: 'CRC', note: null },
+      { id: 'sn4', accountId: 'a-cash', asOf: `${month}-01`, recordedAt: crDayStart(`${month}-01`), balance: 45000, currency: 'CRC', note: null },
     ],
   });
 }

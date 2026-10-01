@@ -196,13 +196,37 @@ Two different things, kept apart:
   never leaves your pocket. Those charges are excluded from personal spending
   and never appear as owed — they are listed under "paid by the company" for
   reference only.
-- **A work expense on one of your own cards** is your money until it comes
-  back. Open the charge on the Transactions tab, set Scope to *Work*, and it
-  appears under **Work — owed to you** in Accounts, whatever card it was on
-  and whatever month it was.
+- **A work expense on one of your own cards or accounts** is your money until
+  it comes back. Open the charge, set its Type to *Work*, and it appears under
+  **Owed to you** in Accounts, whatever card or account it was on and
+  whatever month it was. Paid from savings, it comes off that balance like any
+  expense — it is just not counted as spending.
 
 Which of the two a charge is gets derived from the card it sits on, not
 stored on the charge, so moving a charge to a different card corrects it.
+
+**Getting it back.** When the reimbursement arrives, select the charges under
+Owed to you and choose **Add as income**, or tick "It pays back money owed to
+me" in any income. The income adds to the account; saving it settles the
+charges it pays back (`reimbursement.by` on each, `reimbursement.covers` on the
+income), and Activity labels it Reimbursement. Edit the income to change what
+it covers; delete it and those charges are owed to you again.
+
+### Transaction types
+
+Every transaction has a type, kept in `transactions.scope` (0014). Personal
+and Work are built in; Settings → Transaction types renames them, adds others
+(a shared expense, a loan to someone, medical the insurer pays back) and sets
+two switches for each:
+
+- **Counts as spending** — whether its charges go into the budget, the
+  category totals, the dashboard and the year. Personal always does. A charge
+  on the company's own card never does, whatever its type.
+- **Paid back to me** — whether its charges are tracked under Owed to you.
+
+The definitions live in settings and a charge carries only the key, so
+renaming a type renames it everywhere. Removing one makes its charges Personal.
+Decided in `app/src/tx-types.js`; `countsAsSpending` in `tx.js` applies it.
 
 Charges arrive **unreviewed**, so they show in the app's review badge until
 you have looked at them. A re-run never overwrites a charge you have already

@@ -272,11 +272,12 @@ export function extendWithTransactions(repo) {
      * object at all". There are a few hundred of these a year, so the split
      * happens in the view where it is legible.
      */
-    async listWorkCharges({ since }) {
+    /** Charges of the types owed back (`scopes`), expenses only, since `since`. */
+    async listWorkCharges({ since, scopes = ['work'] }) {
       const uid = await userId();
       const { data, error } = await supabase
         .from('transactions').select(TX_COLS)
-        .eq('user_id', uid).eq('scope', 'work')
+        .eq('user_id', uid).in('scope', scopes).eq('kind', 'expense')
         .gte('posted_at', since)
         .order('posted_at', { ascending: false });
       if (error) boom('load work charges', error);
@@ -490,6 +491,18 @@ export function extendWithBalances(repo) {
       const { error } = await supabase
         .from('push_subscriptions').update(patch).eq('user_id', uid).eq('endpoint', endpoint);
       if (error) boom('save notification settings', error);
+    },
+
+    /**
+     * Every transaction of one type, moved to another — when a type is
+     * removed. A charge no longer owed back loses its reimbursement record.
+     */
+    async retypeTransactions(from, to) {
+      const uid = await userId();
+      const { error } = await supabase
+        .from('transactions').update({ scope: to, reimbursement: null })
+        .eq('user_id', uid).eq('scope', from);
+      if (error) boom('change transaction type', error);
     },
 
     async deletePushSubscription(endpoint) {

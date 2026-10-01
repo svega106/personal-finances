@@ -11,8 +11,9 @@ import {
 import {
   loadMonth, cachedMonth, getAccounts, accountById, matchRule, findCached,
   saveTransaction, removeTransaction, spendTotals, unreviewedCount,
-  effectiveCrc, rateFor, setMonthRate, isWork,
+  effectiveCrc, rateFor, setMonthRate, countsAsSpending,
 } from './tx.js';
+import { typeOf } from './tx-types.js';
 import { icon, merchantIcon, accountIcon } from './icons.js';
 
 const CATS = [
@@ -57,8 +58,15 @@ function accountChip(t) {
 
 function catChip(t) {
   if (t.kind === 'transfer') return '<span class="tx-cat tx-transfer">Transfer</span>';
-  if (t.kind === 'income') return '<span class="tx-cat tx-income">Income</span>';
-  if (t.scope === 'work') return '<span class="tx-cat tx-work">Work</span>';
+  // Money coming back for charges owed to you says so, rather than "Income".
+  if (t.kind === 'income') {
+    return `<span class="tx-cat tx-income">${t.reimbursement?.covers?.length ? 'Reimbursement' : 'Income'}</span>`;
+  }
+  // Any type but Personal is named: it is why the charge does or does not count.
+  const type = typeOf(t);
+  if (type.key !== 'personal') {
+    return `<span class="tx-cat ${type.key === 'work' ? 'tx-work' : 'tx-type'}">${esc(type.label)}</span>`;
+  }
   if (!t.cat) return '<span class="tx-cat tx-none">Uncategorized</span>';
   const label = (CATS.find(([k]) => k === t.cat) || [, t.cat])[1];
   return `<span class="tx-cat tx-${t.cat}">${esc(label)}</span>`;
@@ -290,7 +298,7 @@ function groupByDay(rows) {
     // own, so a raw read would silently drop it from the day even after the
     // month's rate has been set.
     const dayTotal = list.reduce((s, t) => {
-      if (t.kind !== 'expense' || isWork(t)) return s;
+      if (t.kind !== 'expense' || !countsAsSpending(t)) return s;
       return s + (effectiveCrc(t) ?? 0);
     }, 0);
     return `

@@ -18,6 +18,7 @@ import {
   workSelected, clearWorkSelection, setAllWorkSelected, pickWork,
 } from './views-accounts.js';
 import { cachedWork, settle, unsettle } from './work.js';
+import { openIncome } from './money-actions.js';
 
 // The Costa Rica day. An ISO slice would date a balance recorded after 6pm
 // as tomorrow's snapshot.
@@ -440,6 +441,18 @@ export async function acctSettleOne(id) {
   const t = findWork(id);
   if (!t) { toast('Charge not found'); return; }
   await applySettle([t], today());
+}
+
+/**
+ * The money came back: record it as income into an account, with the
+ * selected charges ticked as what it pays back. Saving it settles them.
+ */
+export function acctRepaySelected() {
+  const ids = [...workSelected()].filter((id) => findWork(id));
+  if (!ids.length) { toast('Nothing selected'); return; }
+  // The sheet has its own ticks now; these would only go stale.
+  clearWorkSelection();
+  openIncome(null, { covers: ids });
 }
 
 /**

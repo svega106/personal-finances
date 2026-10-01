@@ -1135,6 +1135,7 @@ body.sheet-open { overflow: hidden; }
 .tx-savings { --tone: var(--cat-savings); }
 .tx-transfer { --tone: var(--cat-transfer); }
 .tx-work { --tone: var(--warn-mark); }
+.tx-type { --tone: var(--muted); }
 .tx-income { --tone: var(--pos-mark); }
 .tx-none { --tone: var(--cat-none); }
 .tx-amt { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; font-size: 15px; font-weight: 650; letter-spacing: -.01em; }
@@ -1370,6 +1371,34 @@ body.sheet-open { overflow: hidden; }
 .push-note b { display: block; color: var(--text); font-weight: 650; }
 .set-text b .i { display: inline-block; vertical-align: -2px; color: var(--pos); margin-right: 4px; }
 label.set-text { flex: 1; min-width: 0; cursor: pointer; }
+
+/* Transaction types in Settings: a name and two switches per row. */
+.type-list { display: flex; flex-direction: column; }
+.type-row {
+  display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 10px 12px;
+  padding: 12px 0; border-top: 1px solid var(--line);
+}
+.type-flags { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px 22px; }
+.type-end { min-width: 46px; display: flex; justify-content: center; }
+.type-row:first-child { border-top: 0; padding-top: 2px; }
+.type-name { height: 38px; }
+.type-flag { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 550; color: var(--text-2); cursor: pointer; white-space: nowrap; }
+.type-flag.locked { cursor: default; }
+.type-lock { font-size: 11px; color: var(--faint); text-align: center; }
+.type-add { display: flex; gap: 8px; margin-top: 12px; }
+.type-add .inp { flex: 1; min-width: 0; height: 38px; }
+
+/* Charges an income pays back, ticked in its sheet. */
+.repay { margin: -4px 0 16px; }
+.repay .check { font-weight: 600; font-size: 13.5px; }
+.repay-list { margin-top: 10px; border: 1px solid var(--line-2); border-radius: 14px; max-height: 240px; overflow-y: auto; }
+.repay-row { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-top: 1px solid var(--line); cursor: pointer; }
+.repay-row:first-child { border-top: 0; }
+.repay-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.repay-main b { font-size: 13.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.repay-main span { font-size: 12px; color: var(--muted); }
+.repay-amt { font-size: 13.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.work-actions { display: inline-flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 
 /* An on/off switch: a real checkbox, drawn as a track and a knob. */
 .switch { position: relative; flex-shrink: 0; width: 46px; height: 28px; }

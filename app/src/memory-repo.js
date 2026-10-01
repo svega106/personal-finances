@@ -53,9 +53,9 @@ export function createMemoryRepo(seed = {}) {
         .sort((a, b) => (a.postedAt < b.postedAt ? 1 : -1));
     },
 
-    async listWorkCharges({ since }) {
+    async listWorkCharges({ since, scopes = ['work'] }) {
       return structuredClone(store.transactions)
-        .filter((t) => t.scope === 'work' && t.postedAt >= since)
+        .filter((t) => scopes.includes(t.scope) && t.kind === 'expense' && t.postedAt >= since)
         .sort((a, b) => (a.postedAt < b.postedAt ? 1 : -1));
     },
 
@@ -197,6 +197,13 @@ export function createMemoryRepo(seed = {}) {
     /** Changes with every write, as the real one does with every row's updated_at. */
     async ledgerMarker() {
       return `${store.transactions.length}|${store.ledgerRev ?? 0}`;
+    },
+
+    async retypeTransactions(from, to) {
+      for (const t of store.transactions) {
+        if (t.scope === from) { t.scope = to; t.reimbursement = null; }
+      }
+      store.ledgerRev = (store.ledgerRev ?? 0) + 1;
     },
 
     async deletePushSubscription(endpoint) {

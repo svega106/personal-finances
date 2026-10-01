@@ -11,6 +11,9 @@ import { chartSlot, drawCharts, resetCharts, donut } from './charts.js';
 import { crDay, crMonth, crHour, crLongDate, crTimeLabel, crShortDate } from './cr-date.js';
 import { upcomingCutoffs } from '../../supabase/functions/_shared/cutoff.js';
 import { pushState, enablePush, disablePush, testNotification, pushPrefs, setPushPref } from './push.js';
+import { txTypes, updateType, addType, removeType } from './tx-types.js';
+import { invalidateWork } from './work.js';
+import { getRepo } from './repo.js';
 
 let currentMonth = monthKey();
 let annualYear = +currentMonth.slice(0,4);
@@ -1018,6 +1021,7 @@ function renderSettings(){
           <button class="btn ghost sm" onclick="setAlloc(50,20,30)">Aggressive saving</button>
         </div>
       </section>
+      ${typesCard()}
     </div>
     <div class="stack">
       <section class="card">
@@ -1155,6 +1159,87 @@ export function liveAlloc(k,v){
   if(se){ se.textContent=sum+'%'; se.style.color = sum===100?'var(--pos)':'var(--warn)'; }
   const hint=document.getElementById('allocHint');
   if(hint) hint.textContent = sum===100?'Balanced to 100%.':'The ideal total is 100%. Adjust so it adds up.';
+}
+
+/* ---- Transaction types ---- */
+
+/**
+ * The types every transaction can have, and what each one means for the
+ * totals (tx-types.js). Personal is fixed as counted; the rest are switches.
+ */
+function typesCard(){
+  const sw = (ty, flag, label) => {
+    const locked = ty.key === 'personal';
+    return `<label class="type-flag${locked ? ' locked' : ''}"${locked ? ` title="Personal is what spending means"` : ''}>
+      <span class="switch"><input type="checkbox" role="switch"${ty[flag] ? ' checked' : ''}${locked ? ' disabled' : ''}
+        onchange="txTypeSet('${ty.key}','${flag}',this.checked)"><span aria-hidden="true"></span></span>${label}</label>`;
+  };
+  const row = (ty) => `
+    <div class="type-row">
+      <input class="inp type-name" value="${esc(ty.label)}" maxlength="40" aria-label="Name of the ${esc(ty.label)} type"
+             onchange="txTypeRename('${ty.key}', this.value)">
+      <span class="type-end">${ty.builtin
+        ? '<span class="type-lock">built in</span>'
+        : `<button class="btn ghost sm danger" onclick="txTypeRemove('${ty.key}')" aria-label="Remove ${esc(ty.label)}">${icon('trash')}</button>`}</span>
+      <div class="type-flags">
+        ${sw(ty, 'spending', 'Counts as spending')}
+        ${sw(ty, 'reimbursable', 'Paid back to me')}
+      </div>
+    </div>`;
+  return `<section class="card">
+    <div class="card-head"><div><h3>Transaction types</h3>
+      <div class="card-sub">Every transaction has a type, picked in its sheet. Only the types that count as
+        spending go into the budget, the categories, the dashboard and the year. Types paid back to you
+        are tracked under Owed to you on Accounts until they are.</div></div></div>
+    <div class="type-list">${txTypes().map(row).join('')}</div>
+    <div class="type-add">
+      <input class="inp" id="type_new" maxlength="40" placeholder="New type, e.g. Shared with Ana"
+             onkeydown="if(event.key==='Enter')txTypeAdd()">
+      <button class="btn sm" onclick="txTypeAdd()">${icon('plus')}Add type</button>
+    </div>
+  </section>`;
+}
+
+export function txTypeRename(key, label){
+  const t = updateType(key, { label });
+  if (t) toast(`Renamed to ${t.label}`);
+  render();
+}
+
+export function txTypeSet(key, flag, on){
+  const t = updateType(key, { [flag]: on });
+  if (!t) return;
+  // Which charges are owed back is a different list now.
+  if (flag === 'reimbursable') invalidateWork();
+  toast(flag === 'spending'
+    ? `${t.label} ${on ? 'counts' : 'no longer counts'} as spending`
+    : `${t.label} ${on ? 'is' : 'is no longer'} tracked as paid back to you`);
+  render();
+}
+
+export function txTypeAdd(){
+  const input = document.getElementById('type_new');
+  const r = addType(input?.value);
+  if (r.error) { toast(r.error); return; }
+  toast(`${r.type.label} added — it does not count as spending until you switch it on`);
+  render();
+}
+
+/** Its transactions become Personal: counted again, and no longer owed back. */
+export async function txTypeRemove(key){
+  const t = txTypes().find((x) => x.key === key);
+  if (!t || t.builtin) return;
+  if (!confirm(`Remove ${t.label}? Any transaction of this type becomes Personal and counts as spending again.`)) return;
+  try {
+    await getRepo().retypeTransactions(key, 'personal');
+    removeType(key);
+    invalidateWork();
+    const { afterLedgerChange } = await import('./refresh.js');
+    await afterLedgerChange();
+    toast(`${t.label} removed`);
+  } catch (err) {
+    toast(`Could not remove it: ${err.message}`);
+  }
 }
 
 /* ---- Theme ---- */

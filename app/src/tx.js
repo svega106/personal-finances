@@ -11,6 +11,7 @@
  */
 import { getRepo } from './repo.js';
 import { crDay, crMonth, CR_OFFSET } from './cr-date.js';
+import { typeOf } from './tx-types.js';
 import { matchRule as sharedMatchRule } from '../../supabase/functions/_shared/classify.js';
 
 /** month key -> transactions, so switching months back and forth is free. */
@@ -135,18 +136,20 @@ export function matchRule(merchantRaw, mcc) {
 /* --------------------------------------------------------------- totals */
 
 /**
- * Work, not personal: marked so, or on the company's own card. The card
- * decides as well as the flag, because the flag is only a default at import
- * and a sheet can change it — a charge on the BNCR card is the company's
- * whatever it is marked.
+ * Whether a charge counts as spending: its type says so (Settings →
+ * Transaction types), and the money was yours. A charge on the company's own
+ * card never counts, whatever it is marked — the type is only a default at
+ * import and a sheet can change it, but the card decides whose money it was.
  */
-export function isWork(t) {
-  return t.scope === 'work' || accountById(t.accountId)?.scope === 'work';
+export function countsAsSpending(t) {
+  if (accountById(t.accountId)?.scope === 'work') return false;
+  return typeOf(t).spending;
 }
 
 /**
- * Personal spending only. Work charges and transfers never count:
- * a transfer moves money, it does not spend it.
+ * Spending only: charges whose type counts. Work, any type switched off in
+ * Settings, and transfers never do — a transfer moves money, it does not
+ * spend it. What was left out is kept as `excluded`.
  */
 export function spendTotals(rows) {
   // Two distinct figures, easily confused:
@@ -156,7 +159,7 @@ export function spendTotals(rows) {
   // unbudgeted, so it is the uncategorized total that is worth surfacing.
   const out = {
     needs: 0, wants: 0, savings: 0,
-    uncategorized: 0, unbudgeted: 0, total: 0, work: 0, byLine: {},
+    uncategorized: 0, unbudgeted: 0, total: 0, excluded: 0, byLine: {},
     // Categorized but matched no plan line, kept per category so the plan can
     // show it as its own row instead of hiding the difference.
     unbudgetedByCat: { needs: 0, wants: 0, savings: 0 },
@@ -177,7 +180,7 @@ export function spendTotals(rows) {
       continue;
     }
 
-    if (isWork(t)) { out.work += crc; continue; }
+    if (!countsAsSpending(t)) { out.excluded += crc; continue; }
     if (t.kind !== 'expense') continue;
 
     out.total += crc;
@@ -202,7 +205,7 @@ export function spendTotals(rows) {
 export function spendByDay(rows) {
   const out = {};
   for (const t of rows ?? []) {
-    if (t.status === 'voided' || isWork(t) || t.kind !== 'expense') continue;
+    if (t.status === 'voided' || t.kind !== 'expense' || !countsAsSpending(t)) continue;
     const crc = effectiveCrc(t);
     if (crc == null) continue;
     const day = crDay(t.postedAt);

@@ -248,7 +248,7 @@ test('colones out of savings, dollars off the card — no rate involved', async 
 
 test("a charge on the company's card is never personal spending, whatever it is marked", async () => {
   const { setRepo } = await import('../src/repo.js');
-  const { loadReference, spendTotals, spendByDay, isWork } = await import('../src/tx.js');
+  const { loadReference, spendTotals, spendByDay, countsAsSpending } = await import('../src/tx.js');
   setRepo(createMemoryRepo({ accounts: [VISA, BNCR] }));
   await loadReference();
 
@@ -258,11 +258,11 @@ test("a charge on the company's card is never personal spending, whatever it is 
   });
   // Marked personal by hand, but on the BNCR card.
   const rows = [charge('c-visa', 'personal'), charge('c-bncr', 'personal'), charge('c-bncr', 'work')];
-  assert.deepEqual(rows.map(isWork), [false, true, true]);
+  assert.deepEqual(rows.map(countsAsSpending), [true, false, false]);
 
   const t = spendTotals(rows);
   assert.equal(t.total, 10000, 'only the personal card counts');
-  assert.equal(t.work, 20000);
+  assert.equal(t.excluded, 20000);
   assert.deepEqual(Object.values(spendByDay(rows)), [10000]);
 });
 
