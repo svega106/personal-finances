@@ -11,7 +11,7 @@ import { getRepo } from './repo.js';
 import { getAccounts, accountById, saveTransaction, removeTransaction } from './tx.js';
 import { findRow, esc, flashRow } from './views-tx.js';
 import { money } from './state.js';
-import { crDay, crMonth, crShortDate } from './cr-date.js';
+import { crDay, crMonth, crShortDate, crClock, crStamp, crTimeLabel, pickedInstant } from './cr-date.js';
 import { afterLedgerChange } from './refresh.js';
 import { icon } from './icons.js';
 import {
@@ -20,7 +20,6 @@ import {
 } from './money-moves.js';
 
 const val = (id) => document.getElementById(id)?.value ?? '';
-const today = () => crDay(new Date());
 
 function fmt(amount, currency) {
   if (currency === 'CRC') return money(amount);
@@ -38,19 +37,37 @@ async function freshBalances() {
 }
 
 /**
- * A balance recorded on or after the day picked already includes it — the
- * same day too, which is the easy one to trip on: set a card's balance this
- * morning, pay it this afternoon, and the payment is already in that figure.
+ * A balance recorded after this moment already includes it, so saving will
+ * not move that balance. Said before Save, so it never looks like a failure.
+ *
+ * A balance entered on the day it is dated stands for the moment it was
+ * entered; a backdated one for the end of its day (`snapshotCut`, 0013).
  */
-function coveredNote(account, balance, date) {
-  if (!account || !balance?.hasSnapshot || !date || date > balance.snapshotDate) return '';
-  return `The balance you recorded for ${esc(account.label)} on ${esc(crShortDate(balance.snapshotDate))} `
-    + 'already includes everything up to that day, so this is kept in its history without changing that balance.';
+export function coveredNote(account, balance, instant) {
+  if (!account || !balance?.hasSnapshot || !balance.snapshotCut || !instant) return '';
+  if (Date.parse(instant) > Date.parse(balance.snapshotCut)) return '';
+  const when = crDay(balance.snapshotCut) === balance.snapshotDate
+    ? `at ${crTimeLabel(balance.snapshotCut)} on ${crShortDate(balance.snapshotDate)}`
+    : `for ${crShortDate(balance.snapshotDate)}`;
+  return `${esc(account.label)}’s balance was recorded ${esc(when)}, and this is before that — it is already `
+    + 'in that figure, so the balance will not change. It is kept in Activity.';
+}
+
+/** Date and time, side by side: both are what an entry is stamped with. */
+function whenFields(prefix, instant) {
+  return `<div class="tx-2col">
+      <div class="field"><label for="${prefix}_date">Date</label>
+        <input class="inp" id="${prefix}_date" type="date" value="${crDay(instant)}"></div>
+      <div class="field"><label for="${prefix}_time">Time</label>
+        <input class="inp" id="${prefix}_time" type="time" value="${crClock(instant)}"></div>
+    </div>`;
 }
 
 /* ------------------------------------------------------ Transfer to card */
 
 export async function openTransfer(id) {
+  // The moment the sheet opened: a new transfer left at it is stamped with it.
+  const openedAt = crStamp();
   const existing = id ? findRow(id) : null;
   if (id && !existing) { toast('Transfer not found'); return; }
 
@@ -117,12 +134,9 @@ export async function openTransfer(id) {
     </div>
     <p class="move-hint" id="mv_hint" aria-live="polite"></p>
 
-    <div class="tx-2col">
-      <div class="field"><label for="mv_date">Date</label>
-        <input class="inp" id="mv_date" type="date" value="${existing ? crDay(existing.postedAt) : today()}"></div>
-      <div class="field"><label for="mv_note">Note <span class="faint">(optional)</span></label>
-        <input class="inp" id="mv_note" value="${esc(existing?.note ?? '')}" placeholder="e.g. September statement"></div>
-    </div>
+    ${whenFields('mv', existing?.postedAt ?? openedAt)}
+    <div class="field"><label for="mv_note">Note <span class="faint">(optional)</span></label>
+      <input class="inp" id="mv_note" value="${esc(existing?.note ?? '')}" placeholder="e.g. September statement"></div>
 
     <div class="actions">
       ${existing ? `<button class="btn ghost danger" onclick="moveDelete('${esc(existing.id)}')" aria-label="Delete">${icon('trash')}<span class="lbl">Delete</span></button>` : '<span></span>'}
@@ -138,6 +152,8 @@ export async function openTransfer(id) {
       amount: Number(val('mv_amount')),
       destAmount: Number(val('mv_amount2')),
       date: val('mv_date'),
+      time: val('mv_time'),
+      at: pickedInstant(existing?.postedAt ?? openedAt, val('mv_date'), val('mv_time')),
       balance: balances.get(source?.id),
       original: existing,
     };
@@ -174,11 +190,14 @@ export async function openTransfer(id) {
       el.innerHTML = `${icon('alert', { size: 15 })}<span>${esc(err)}</span>`;
       return;
     }
+    const sourceCovered = coveredNote(f.source, f.balance, f.at);
     if (f.balance?.hasSnapshot) {
       const giveBack = existing && existing.accountId === f.source.id ? existing.amount : 0;
       const available = f.balance.currentBalance + giveBack;
       const after = typed ? available - f.amount : available;
-      lines.push(`${fmt(available, f.source.currency)} in ${esc(f.source.label)}${typed ? ` · ${fmt(after, f.source.currency)} after` : ''}`);
+      // No "after" when the recorded balance already includes it: it would not move.
+      const shows = typed && !sourceCovered;
+      lines.push(`${fmt(available, f.source.currency)} in ${esc(f.source.label)}${shows ? ` · ${fmt(after, f.source.currency)} after` : ''}`);
     }
     // The rate the bank used, worked back from the two figures — a quick
     // check that neither was mistyped.
@@ -187,14 +206,14 @@ export async function openTransfer(id) {
       lines.push(`That is ${money(crc / usd)} per dollar.`);
     }
     for (const [acct, bal] of [[f.source, f.balance], [f.dest, balances.get(f.dest?.id)]]) {
-      const covered = coveredNote(acct, bal, f.date);
+      const covered = coveredNote(acct, bal, f.at);
       if (covered) lines.push(covered);
     }
     el.className = 'move-hint';
     el.innerHTML = lines.map((l) => `<span>${l}</span>`).join('');
   };
 
-  for (const id2 of ['mv_source', 'mv_dest', 'mv_amount', 'mv_amount2', 'mv_date']) {
+  for (const id2 of ['mv_source', 'mv_dest', 'mv_amount', 'mv_amount2', 'mv_date', 'mv_time']) {
     document.getElementById(id2)?.addEventListener('input', hint);
     document.getElementById(id2)?.addEventListener('change', hint);
   }
@@ -204,7 +223,7 @@ export async function openTransfer(id) {
     const f = read();
     const err = validateTransfer(f);
     if (err) { tried = true; toast(err); hint(); return; }
-    const row = transferRow({ ...f, note: val('mv_note'), existing });
+    const row = transferRow({ ...f, openedAt, note: val('mv_note'), existing });
     const paid = crossCurrency(f.source, f.dest)
       ? `${fmt(f.amount, f.source.currency)} (${fmt(f.destAmount, f.dest.currency)})` : fmt(f.amount, f.source.currency);
     await save(row, 'mv_save', existing ? 'Transfer updated' : `Transferred ${paid} to ${f.dest.label}`);
@@ -214,6 +233,7 @@ export async function openTransfer(id) {
 /* ------------------------------------------------------------ Add income */
 
 export async function openIncome(id) {
+  const openedAt = crStamp();
   const existing = id ? findRow(id) : null;
   if (id && !existing) { toast('Income not found'); return; }
 
@@ -257,12 +277,9 @@ export async function openIncome(id) {
 
     <div class="field"><label for="in_from">From</label>
       <input class="inp" id="in_from" value="${esc(existing?.merchant ?? '')}" placeholder="e.g. Paycheck" autocomplete="off"></div>
-    <div class="tx-2col">
-      <div class="field"><label for="in_date">Date</label>
-        <input class="inp" id="in_date" type="date" value="${existing ? crDay(existing.postedAt) : today()}"></div>
-      <div class="field"><label for="in_note">Note <span class="faint">(optional)</span></label>
-        <input class="inp" id="in_note" value="${esc(existing?.note ?? '')}"></div>
-    </div>
+    ${whenFields('in', existing?.postedAt ?? openedAt)}
+    <div class="field"><label for="in_note">Note <span class="faint">(optional)</span></label>
+      <input class="inp" id="in_note" value="${esc(existing?.note ?? '')}"></div>
 
     <div class="actions">
       ${existing ? `<button class="btn ghost danger" onclick="moveDelete('${esc(existing.id)}')" aria-label="Delete">${icon('trash')}<span class="lbl">Delete</span></button>` : '<span></span>'}
@@ -274,6 +291,8 @@ export async function openIncome(id) {
     account: accountById(val('in_account')),
     amount: Number(val('in_amount')),
     date: val('in_date'),
+    time: val('in_time'),
+    at: pickedInstant(existing?.postedAt ?? openedAt, val('in_date'), val('in_time')),
   });
 
   const hint = () => {
@@ -282,16 +301,16 @@ export async function openIncome(id) {
     const el = document.getElementById('in_hint');
     const b = balances.get(f.account?.id);
     const lines = [];
-    if (b?.hasSnapshot && f.amount > 0) {
+    const covered = coveredNote(f.account, b, f.at);
+    if (b?.hasSnapshot && f.amount > 0 && !covered) {
       const giveBack = existing && existing.accountId === f.account.id ? existing.amount : 0;
       lines.push(`${esc(f.account.label)}: ${fmt(b.currentBalance - giveBack, f.account.currency)} → ${fmt(b.currentBalance - giveBack + f.amount, f.account.currency)}`);
     }
-    const covered = coveredNote(f.account, b, f.date);
     if (covered) lines.push(covered);
     el.className = 'move-hint';
     el.innerHTML = lines.map((l) => `<span>${l}</span>`).join('');
   };
-  for (const id2 of ['in_account', 'in_amount', 'in_date']) {
+  for (const id2 of ['in_account', 'in_amount', 'in_date', 'in_time']) {
     document.getElementById(id2)?.addEventListener('input', hint);
     document.getElementById(id2)?.addEventListener('change', hint);
   }

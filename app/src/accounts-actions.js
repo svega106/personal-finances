@@ -53,10 +53,10 @@ export function acctUpdate(accountId) {
     <h3>${isCard ? `What ${esc(b.label)} owes` : `Balance for ${esc(b.label)}`}</h3>
     <p class="sheet-sub">${isCard
       ? `Enter what the bank shows as owed on the ${b.currency === 'CRC' ? 'colón' : 'dollar'} balance right now.
-         Charges after this date are added on top and payments come off, so you only
+         Charges after this moment are added on top and payments come off, so you only
          need to do this when the two have drifted apart.`
-      : `Enter what the account actually holds right now. Anything you record
-         after this date is added on top, so you only need to do this when the
+      : `Enter what the account actually holds right now. Anything recorded
+         after this moment is added on top, so you only need to do this when the
          two have drifted apart.`}
     </p>
 
@@ -75,6 +75,10 @@ export function acctUpdate(accountId) {
       <div class="field"><label for="bal_note">Note <span class="faint">(optional)</span></label>
         <input class="inp" id="bal_note" placeholder="e.g. after the bonus"></div>
     </div>
+    <p class="field-hint" style="margin:-8px 0 14px">
+      Today means right now: anything entered after this counts on top. An earlier
+      date means the end of that day.
+    </p>
 
     <div class="actions">
       ${isCard ? `<button class="btn ghost" onclick="acctEdit('${esc(accountId)}')">${icon('settings')}<span class="lbl">Card settings</span></button>` : '<span></span>'}

@@ -9,11 +9,12 @@ import { getAccounts, accountById, matchRule, saveTransaction, removeTransaction
 import { getMonth, money, monthLabel } from './state.js';
 import { initialReimbursement } from './work.js';
 import { findRow, blankTx, CATS, esc, flashRow, onFlashHidden } from './views-tx.js';
-import { crDay, crMonth, crNoon } from './cr-date.js';
+import { crDay, crMonth, crClock, pickedInstant } from './cr-date.js';
+import { getRepo } from './repo.js';
 import { afterLedgerChange } from './refresh.js';
 import { txFilters } from './views-tx.js';
 import { icon } from './icons.js';
-import { openTransfer, openIncome } from './money-actions.js';
+import { openTransfer, openIncome, coveredNote } from './money-actions.js';
 
 let editing = null;
 
@@ -50,10 +51,11 @@ export function txEdit(id) {
 function sheet(t) {
   const accs = getAccounts();
   const isNew = !t.id;
-  // The Costa Rica day, not the UTC one. Slicing the timestamp showed a 9pm
-  // charge as tomorrow — and since saving writes this field back, it moved
-  // the charge there and replaced the time it happened with noon.
+  // The Costa Rica day and time, not the UTC ones. Slicing the timestamp
+  // showed a 9pm charge as tomorrow — and since saving writes these fields
+  // back, it moved the charge there and replaced the time it happened.
   const date = crDay(t.postedAt);
+  const time = crClock(t.postedAt);
 
   return `
     <h3>${isNew ? 'Add expense' : 'Edit transaction'}</h3>
@@ -81,12 +83,16 @@ function sheet(t) {
     <div class="tx-2col">
       <div class="field"><label for="tx_date">Date</label>
         <input class="inp" id="tx_date" type="date" value="${date}"></div>
-      <div class="field"><label for="tx_account">Account</label>
-        <select class="inp" id="tx_account">
-          <option value="">—</option>
-          ${accs.map((a) => `<option value="${esc(a.id)}"${t.accountId === a.id ? ' selected' : ''}>${esc(a.label)}</option>`).join('')}
-        </select></div>
+      <div class="field"><label for="tx_time">Time</label>
+        <input class="inp" id="tx_time" type="time" value="${time}"></div>
     </div>
+
+    <div class="field"><label for="tx_account">Account</label>
+      <select class="inp" id="tx_account">
+        <option value="">—</option>
+        ${accs.map((a) => `<option value="${esc(a.id)}"${t.accountId === a.id ? ' selected' : ''}>${esc(a.label)}</option>`).join('')}
+      </select></div>
+    <p class="move-hint" id="tx_hint" aria-live="polite"></p>
 
     <div class="tx-2col">
       <div class="field"><label for="tx_cat">Category</label>
@@ -176,7 +182,39 @@ function wireSheet() {
     if (cat && catSel) catSel.value = cat;
   });
 
+  // What saving does to the account's recorded balance, said before Save —
+  // or, when a balance recorded after this moment already includes it, that
+  // the balance will not move. Never silent either way.
+  let balances = null;
+  const hint = () => {
+    const el = document.getElementById('tx_hint');
+    if (!el) return;
+    const a = accountById(val('tx_account'));
+    const b = a && balances?.get(a.id);
+    if (!b?.hasSnapshot) { el.innerHTML = ''; return; }
+    const at = pickedInstant(editing.postedAt, val('tx_date'), val('tx_time'));
+    const covered = coveredNote(a, b, at);
+    if (covered) { el.innerHTML = `<span>${covered}</span>`; return; }
+    // The figure after it, for a new entry in the account's own currency.
+    const amount = Number(val('tx_amount')) || 0;
+    if (editing.id || amount <= 0 || val('tx_currency') !== a.currency) { el.innerHTML = ''; return; }
+    const show = (v) => (a.type === 'card' ? `owes ${fmtIn(-v, a.currency)}` : fmtIn(v, a.currency));
+    el.innerHTML = `<span>${esc(a.label)}: ${show(b.currentBalance)} → ${show(b.currentBalance - amount)}</span>`;
+  };
+  for (const id of ['tx_account', 'tx_date', 'tx_time', 'tx_amount', 'tx_currency']) {
+    document.getElementById(id)?.addEventListener('input', hint);
+    document.getElementById(id)?.addEventListener('change', hint);
+  }
+  getRepo().listAccountBalances()
+    .then((list) => { balances = new Map(list.map((b) => [b.accountId, b])); hint(); })
+    .catch(() => { /* the hint is a courtesy; saving does not need it */ });
+
   document.getElementById('tx_save')?.addEventListener('click', txSave);
+}
+
+function fmtIn(amount, currency) {
+  if (currency === 'CRC') return money(amount);
+  return `$${Number(amount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 const val = (id) => document.getElementById(id)?.value ?? '';
@@ -198,12 +236,10 @@ export async function txSave() {
     // Conversion is the month's job, not this row's.
     fxRate: null,
     amountCrc: currency === 'CRC' ? amount : null,
-    // The sheet offers a date, not a time. Rewriting an untouched date as
-    // noon would throw away the minute the bank recorded — so the instant is
-    // only rebuilt when the day actually changed.
-    postedAt: editing.postedAt && crDay(editing.postedAt) === val('tx_date')
-      ? editing.postedAt
-      : crNoon(val('tx_date')),
+    // Untouched, the instant it opened with is kept exactly: the minute and
+    // second the bank recorded, or the moment a new entry was started. A
+    // changed date or time is taken as picked — never rounded to noon.
+    postedAt: pickedInstant(editing.postedAt, val('tx_date'), val('tx_time')),
     accountId: val('tx_account') || null,
     cat: val('tx_cat') || null,
     budgetLineId: val('tx_line') || null,

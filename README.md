@@ -231,10 +231,27 @@ stored, and the row is what it always was.
 
 **A card's balance** is set by tapping it in Accounts: what the bank says is
 owed right now. It is a balance snapshot like a savings account's, stored
-negative. Everything dated after it is added on top — but not the same day,
-so a payment dated the day a balance was set is already in that figure; the
-transfer sheet says so when that happens. The card's own settings (name,
+negative. Everything after it is added on top. The card's own settings (name,
 network, cutoff, removing it) are behind **Settings** on the card.
+
+**A recorded balance is a moment** (0013). Entered on the day it is dated, it
+stands for the moment it was entered: anything after counts on top, anything
+before is already in it. Dated an earlier day, it stands for the end of that
+day, in Costa Rica time. `balance_snapshots.recorded_at` is set by a trigger
+on every save, so re-entering today's balance moves the moment too, and the
+view exposes the instant as `snapshot_cut`. Every sheet — expense, transfer,
+income — says when an entry falls before it and so will not move the balance.
+
+It used to be a day, compared in UTC: an expense entered the afternoon a
+balance was recorded never moved it, while an evening charge — already the
+next day in UTC — did. That, and manual entries all stamped 12:00, was why an
+expense on Ahorros ₡ could leave its balance where it was.
+
+**Manual entries keep their time.** The expense, transfer and income sheets
+have a Time beside the Date. A new entry is stamped with the moment it was
+started, to the second; one left untouched keeps its exact instant; a picked
+date or time is taken as given. 0013 gives entries already stamped at noon on
+the day they were entered the moment they were actually entered.
 
 **Adding and removing cards.** Accounts → Add account → Credit card adds the
 card's colón and dollar balances together (or only one), with its network,

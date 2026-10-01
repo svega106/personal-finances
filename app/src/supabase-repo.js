@@ -317,6 +317,8 @@ function balanceFromRow(r) {
     type: r.type,
     currency: r.currency,
     snapshotDate: r.snapshot_date,
+    // The instant the balance stands for (0013): what came after it counts on top.
+    snapshotCut: r.snapshot_cut ?? null,
     snapshotBalance: r.snapshot_balance == null ? null : Number(r.snapshot_balance),
     currentBalance: Number(r.current_balance) || 0,
     hasSnapshot: !!r.has_snapshot,
@@ -348,7 +350,7 @@ export function extendWithBalances(repo) {
       const { data, error } = await supabase
         .from('account_balances')
         .select('account_id, label, type, currency, snapshot_date, snapshot_balance,'
-              + ' current_balance, has_snapshot, snapshot_stale, scope, pending_fx')
+              + ' current_balance, has_snapshot, snapshot_stale, scope, pending_fx, snapshot_cut')
         .eq('user_id', uid);
       if (error) boom('load balances', error);
       return (data ?? []).map(balanceFromRow);

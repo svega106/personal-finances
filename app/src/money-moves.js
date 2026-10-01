@@ -19,7 +19,7 @@
  * No DOM and no repository, so all of it is under test.
  */
 import { uid, money } from './state.js';
-import { crDay, crNoon } from './cr-date.js';
+import { crStamp, pickedInstant } from './cr-date.js';
 
 /** A transfer comes from savings — where the paycheck lands. */
 export function transferSources(accounts) {
@@ -98,14 +98,15 @@ export function validateIncome({ account, amount, date }) {
 }
 
 /**
- * The instant to store for a picked day.
+ * The instant to store for a picked day and time.
  *
- * The sheet offers a day, not a time. Rebuilding an untouched day as noon
- * would throw away the time it was recorded — the same rule the expense sheet
- * follows.
+ * Compared against what the sheet opened with — the row being edited, or the
+ * moment a new one was started — so an untouched entry keeps its exact time,
+ * and a new one is stamped with when it was made, never noon. The same rule
+ * as the expense sheet.
  */
-function postedAt(existing, date) {
-  return existing?.postedAt && crDay(existing.postedAt) === date ? existing.postedAt : crNoon(date);
+function postedAt(existing, date, time, openedAt) {
+  return pickedInstant(existing?.postedAt ?? openedAt ?? crStamp(), date, time);
 }
 
 function base(existing) {
@@ -124,11 +125,11 @@ function base(existing) {
  * card in its own currency. Within one currency it is ignored, so a stale
  * figure from a form that was switched back can never be written.
  */
-export function transferRow({ source, dest, amount, destAmount, date, note, existing }) {
+export function transferRow({ source, dest, amount, destAmount, date, time, openedAt, note, existing }) {
   return {
     ...base(existing),
     kind: 'transfer',
-    postedAt: postedAt(existing, date),
+    postedAt: postedAt(existing, date, time, openedAt),
     merchant: `To ${dest.label}`,
     merchantRaw: `To ${dest.label}`,
     amount,
@@ -151,12 +152,12 @@ export function transferRow({ source, dest, amount, destAmount, date, note, exis
 }
 
 /** The transaction for money coming into `account`. */
-export function incomeRow({ account, amount, date, from, note, existing }) {
+export function incomeRow({ account, amount, date, time, openedAt, from, note, existing }) {
   const name = String(from ?? '').trim() || 'Income';
   return {
     ...base(existing),
     kind: 'income',
-    postedAt: postedAt(existing, date),
+    postedAt: postedAt(existing, date, time, openedAt),
     merchant: name,
     merchantRaw: name,
     amount,

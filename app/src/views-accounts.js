@@ -16,7 +16,7 @@ import { rateFor, accountById } from './tx.js';
 import { esc, dayKey, dayLabel } from './views-tx.js';
 import { workFor, splitWork, totalByCurrency, isReimbursed, isCompanyPaid } from './work.js';
 import { icon, accountIcon, cardThumb, merchantIcon, bankOf, networkMark, cardArt } from './icons.js';
-import { crDay, crShortDate } from './cr-date.js';
+import { crDay, crShortDate, crTimeLabel } from './cr-date.js';
 import { upcomingCutoffs } from '../../supabase/functions/_shared/cutoff.js';
 
 /**
@@ -35,7 +35,10 @@ export function cachedBalances() { return balances; }
 function staleLabel(b) {
   if (!b.hasSnapshot) return '<span class="pill neutral">never set</span>';
   if (b.stale) return `<span class="pill warn">${icon('clock')}last set ${esc(crShortDate(b.snapshotDate))}</span>`;
-  return `<span>as of ${esc(crShortDate(b.snapshotDate))}</span>`;
+  // Entered on the day it is dated, a balance is a moment, and says which.
+  const moment = b.snapshotCut && crDay(b.snapshotCut) === b.snapshotDate
+    ? `, ${crTimeLabel(b.snapshotCut)}` : '';
+  return `<span>as of ${esc(crShortDate(b.snapshotDate))}${esc(moment)}</span>`;
 }
 
 function fmt(amount, currency) {

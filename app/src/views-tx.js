@@ -5,7 +5,9 @@
  * skeleton first and fills it in. `render()` in app.js stays synchronous.
  */
 import { money, uid, monthLabel } from './state.js';
-import { crDay as dayKey, crMonth, crDayLabel as dayLabel, crTimeLabel as timeLabel, crNoon } from './cr-date.js';
+import {
+  crDay as dayKey, crMonth, crDayLabel as dayLabel, crTimeLabel as timeLabel, crStamp, crAt, crClock,
+} from './cr-date.js';
 import {
   loadMonth, cachedMonth, getAccounts, accountById, matchRule, findCached,
   saveTransaction, removeTransaction, spendTotals, unreviewedCount,
@@ -389,14 +391,17 @@ export function blankTx(monthKey) {
   // Today is the Costa Rica day, not the UTC one. Slicing an ISO string dates
   // anything entered after 6pm as tomorrow — and on the last evening of a
   // month, into the next month, where it is saved but invisible.
-  const today = dayKey(new Date());
-  const thisMonth = crMonth(new Date()) === monthKey;
-  const date = thisMonth ? today : `${monthKey}-01`;
+  //
+  // And the time is the moment it is being entered, to the second — not noon,
+  // which put every manual entry at 12:00 and before any balance recorded
+  // later that day, where it could never move it.
+  const now = new Date();
+  const thisMonth = crMonth(now) === monthKey;
   return {
     id: null,
     extId: `manual:${uid()}${Date.now().toString(36)}`,
     kind: 'expense',
-    postedAt: crNoon(date),
+    postedAt: thisMonth ? crStamp(now) : crAt(`${monthKey}-01`, crClock(now)),
     merchantRaw: '',
     merchant: '',
     amount: 0,

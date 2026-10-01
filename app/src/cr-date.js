@@ -85,8 +85,74 @@ export function crShortDate(key, now = new Date()) {
  * A date the user picked, as an instant.
  *
  * Noon rather than midnight: a date with no time is only ever a day, and noon
- * is the hour that survives being read back in any nearby zone.
+ * is the hour that survives being read back in any nearby zone. Only a
+ * fallback now — the sheets ask for the time as well (`crAt`).
  */
 export function crNoon(day) {
   return `${day}T12:00:00${CR_OFFSET}`;
+}
+
+/** An instant's wall-clock fields in Costa Rica, zero-padded, 24-hour. */
+function fields(when) {
+  return Object.fromEntries(new Intl.DateTimeFormat('en-US', {
+    timeZone: ZONE, year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+  }).formatToParts(new Date(when)).map((p) => [p.type, p.value]));
+}
+
+/** The time of day an instant happened at in Costa Rica, as a time field holds it: "21:29". */
+export function crClock(iso) {
+  const f = fields(iso);
+  return `${f.hour}:${f.minute}`;
+}
+
+/**
+ * An instant written in Costa Rica time, to the second — the moment something
+ * is entered, kept as it was rather than rounded to the day.
+ */
+export function crStamp(when = new Date()) {
+  const f = fields(when);
+  return `${f.year}-${f.month}-${f.day}T${f.hour}:${f.minute}:${f.second}${CR_OFFSET}`;
+}
+
+/** A picked day and time of day ("21:29"), as an instant. Noon when the time is unusable. */
+export function crAt(day, clock) {
+  return /^\d{2}:\d{2}$/.test(clock ?? '') ? `${day}T${clock}:00${CR_OFFSET}` : crNoon(day);
+}
+
+/**
+ * The instant a sheet should store, given the one it opened with.
+ *
+ * Left alone, the original is kept exactly: a bank email's minute and second,
+ * or the moment a new entry was started. Change the day or the time and it is
+ * rebuilt from what was picked. With no time given at all, the day moves and
+ * the time of day stays.
+ */
+export function pickedInstant(original, day, clock) {
+  const time = clock ?? crClock(original);
+  if (crDay(original) === day && crClock(original) === time) return original;
+  return crAt(day, time);
+}
+
+/** The day after a day key. */
+export function crDayAfter(day) {
+  const [y, m, d] = day.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d + 1)).toLocaleDateString('en-CA', { timeZone: 'UTC' });
+}
+
+/** The first instant of a Costa Rica day. */
+export function crDayStart(day) {
+  return `${day}T00:00:00${CR_OFFSET}`;
+}
+
+/**
+ * The instant a recorded balance stands for: the moment it was entered, when
+ * it is dated the day it was entered — "what the account holds right now" —
+ * or the end of its day when it was dated another day. Anything after this
+ * counts on top of it; anything before is already in it. Mirrors
+ * `account_balances.snapshot_cut` (0013).
+ */
+export function snapshotCut({ asOf, recordedAt }) {
+  if (recordedAt && crDay(recordedAt) === asOf) return recordedAt;
+  return crDayStart(crDayAfter(asOf));
 }

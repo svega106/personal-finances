@@ -6,7 +6,7 @@
  * Writes go nowhere. That is the point: nothing here should be mistaken for
  * persistence.
  */
-import { crDay } from './cr-date.js';
+import { crDay, crStamp, snapshotCut } from './cr-date.js';
 export function createMemoryRepo(seed = {}) {
   const store = {
     months: structuredClone(seed.months ?? {}),
@@ -85,13 +85,14 @@ export function createMemoryRepo(seed = {}) {
     /* ----------------------------------------------------------- balances */
 
     async listAccountBalances() {
-      // Mirrors the `account_balances` view: last snapshot on or before today,
-      // plus every transaction posted after it.
+      // Mirrors the `account_balances` view: the last snapshot, plus every
+      // transaction posted after the instant it stands for (0013).
       return store.accounts.map((a) => {
         const snaps = store.snapshots
           .filter((s) => s.accountId === a.id)
           .sort((x, y) => (x.asOf < y.asOf ? 1 : -1));
         const last = snaps[0] ?? null;
+        const cut = last ? snapshotCut(last) : null;
         // A transfer's arriving side may carry its own amount, in this
         // account's currency (0011); that side then counts whatever the row's
         // own currency is.
@@ -101,7 +102,7 @@ export function createMemoryRepo(seed = {}) {
           .filter((t) => t.status !== 'voided'
             && (t.currency === a.currency || arrived(t))
             && (t.accountId === a.id || t.counterpartyAccountId === a.id)
-            && (!last || crDay(t.postedAt) > last.asOf))
+            && (!cut || Date.parse(t.postedAt) > Date.parse(cut)))
           .reduce((sum, t) => {
             if (t.kind === 'income' || t.kind === 'adjustment') return sum + t.amount;
             if (t.kind === 'transfer') {
@@ -122,6 +123,7 @@ export function createMemoryRepo(seed = {}) {
           type: a.type,
           currency: a.currency,
           snapshotDate: last?.asOf ?? null,
+          snapshotCut: cut,
           snapshotBalance: last ? last.balance : null,
           currentBalance: (last ? last.balance : 0) + moved,
           hasSnapshot: !!last,
@@ -142,7 +144,9 @@ export function createMemoryRepo(seed = {}) {
     async saveSnapshot({ accountId, asOf, balance, currency, note }) {
       const at = store.snapshots.findIndex(
         (s) => s.accountId === accountId && s.asOf === asOf);
-      const row = { accountId, asOf, balance, currency, note: note || null };
+      // Stamped on every save, as the database's trigger does: a balance
+      // re-entered later the same day stands for the later moment.
+      const row = { accountId, asOf, balance, currency, note: note || null, recordedAt: crStamp() };
       if (at >= 0) { row.id = store.snapshots[at].id; store.snapshots[at] = row; }
       else { row.id = `sn${seq++}`; store.snapshots.push(row); }
     },

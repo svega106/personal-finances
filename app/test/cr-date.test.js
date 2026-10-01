@@ -16,7 +16,10 @@ import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { crDay, crMonth, crDayLabel, crTimeLabel, crNoon, CR_OFFSET } from '../src/cr-date.js';
+import {
+  crDay, crMonth, crDayLabel, crTimeLabel, crNoon, CR_OFFSET,
+  crClock, crStamp, crAt, pickedInstant, crDayAfter, snapshotCut,
+} from '../src/cr-date.js';
 
 /* ------------------------------------------------------------ the helpers */
 
@@ -59,6 +62,52 @@ test('a date survives the round trip the edit sheet makes', () => {
   const shownInTheField = crDay(stored);
   const writtenBack = crNoon(shownInTheField);
   assert.equal(crDay(writtenBack), crDay(stored));
+});
+
+/* ------------------------------------------------------- times of day */
+
+test('the time a field shows is the Costa Rica clock, 24-hour', () => {
+  assert.equal(crClock('2026-09-25T03:29:00+00:00'), '21:29');
+  assert.equal(crClock('2026-09-25T06:05:00+00:00'), '00:05', 'midnight is 00, not 24');
+});
+
+test('a new entry is stamped with the moment it is made, to the second', () => {
+  const at = new Date('2026-09-30T21:07:42Z'); // 3:07:42 pm in Costa Rica
+  assert.equal(crStamp(at), `2026-09-30T15:07:42${CR_OFFSET}`);
+  assert.equal(Date.parse(crStamp(at)), at.getTime());
+});
+
+test('a picked day and time becomes that instant', () => {
+  assert.equal(crAt('2026-09-30', '15:05'), `2026-09-30T15:05:00${CR_OFFSET}`);
+  assert.equal(crAt('2026-09-30', ''), crNoon('2026-09-30'), 'no usable time: noon, as before');
+});
+
+test('a sheet left alone keeps the exact instant it opened with', () => {
+  const email = '2026-09-25T03:29:17+00:00'; // 9:29:17 pm, with seconds
+  assert.equal(pickedInstant(email, '2026-09-24', '21:29'), email);
+  const started = crStamp(new Date('2026-09-30T21:07:42Z'));
+  assert.equal(pickedInstant(started, '2026-09-30', '15:07'), started);
+});
+
+test('changing the day or the time rebuilds it from what was picked', () => {
+  const email = '2026-09-25T03:29:17+00:00';
+  assert.equal(pickedInstant(email, '2026-09-24', '08:15'), `2026-09-24T08:15:00${CR_OFFSET}`);
+  assert.equal(pickedInstant(email, '2026-09-23', '21:29'), `2026-09-23T21:29:00${CR_OFFSET}`);
+  // No time field: the day moves, the time of day stays — never noon.
+  assert.equal(pickedInstant(email, '2026-09-23'), `2026-09-23T21:29:00${CR_OFFSET}`);
+});
+
+test('the day after rolls over months and years', () => {
+  assert.equal(crDayAfter('2026-09-30'), '2026-10-01');
+  assert.equal(crDayAfter('2026-12-31'), '2027-01-01');
+  assert.equal(crDayAfter('2028-02-28'), '2028-02-29');
+});
+
+test('a balance entered today stands for that moment; a backdated one for the end of its day', () => {
+  const typed = '2026-09-30T15:05:00-06:00';
+  assert.equal(snapshotCut({ asOf: '2026-09-30', recordedAt: typed }), typed);
+  assert.equal(snapshotCut({ asOf: '2026-09-28', recordedAt: typed }), `2026-09-29T00:00:00${CR_OFFSET}`);
+  assert.equal(snapshotCut({ asOf: '2026-09-28' }), `2026-09-29T00:00:00${CR_OFFSET}`, 'no record of when: end of day');
 });
 
 /* ------------------------------------------------ and the guard on the source */

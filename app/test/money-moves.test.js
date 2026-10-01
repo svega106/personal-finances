@@ -265,3 +265,59 @@ test("a charge on the company's card is never personal spending, whatever it is 
   assert.equal(t.work, 20000);
   assert.deepEqual(Object.values(spendByDay(rows)), [10000]);
 });
+
+/* ------------------------------------------- when an entry is, and what it moves */
+
+test('a new entry is stamped with when it was started, unless a time is picked', () => {
+  const openedAt = '2026-09-30T15:07:42-06:00';
+  const at = (x) => transferRow({ ...ok, date: '2026-09-30', openedAt, ...x }).postedAt;
+  assert.equal(at({ time: '15:07' }), openedAt, 'left alone: the moment, to the second');
+  assert.equal(at({ time: '08:30' }), '2026-09-30T08:30:00-06:00', 'picked: as picked');
+  assert.equal(incomeRow({ account: AHORROS, amount: 1, date: '2026-09-29', time: '15:07', openedAt }).postedAt,
+    '2026-09-29T15:07:00-06:00', 'another day keeps the time shown');
+  assert.doesNotMatch(at({ time: '15:07' }), /T12:00:00/, 'never noon');
+});
+
+const spend = (id, postedAt, amount) => ({
+  id, extId: id, kind: 'expense', postedAt, amount, currency: 'CRC',
+  accountId: 's-crc', scope: 'personal', status: 'settled',
+});
+
+test('a balance entered today counts what comes after that moment, and not what came before', async () => {
+  const repo = createMemoryRepo({
+    accounts: [AHORROS],
+    snapshots: [{ id: 'sn', accountId: 's-crc', asOf: '2026-09-30', balance: 100000, currency: 'CRC',
+      recordedAt: '2026-09-30T15:05:00-06:00' }],
+    transactions: [
+      spend('before', '2026-09-30T09:00:00-06:00', 1000), // already in the figure typed at 3:05
+      spend('after', '2026-09-30T15:30:00-06:00', 2000),  // the expense added afterwards
+    ],
+  });
+  const [b] = await repo.listAccountBalances();
+  assert.equal(b.currentBalance, 98000);
+  assert.equal(b.snapshotCut, '2026-09-30T15:05:00-06:00');
+});
+
+test('a backdated balance includes its whole Costa Rica day, evening too', async () => {
+  const repo = createMemoryRepo({
+    accounts: [AHORROS],
+    snapshots: [{ id: 'sn', accountId: 's-crc', asOf: '2026-09-28', balance: 100000, currency: 'CRC',
+      recordedAt: '2026-09-30T10:00:00-06:00' }],
+    transactions: [
+      // 8:30pm on the 28th is the 29th in UTC — still the 28th here, so in the figure.
+      spend('evening', '2026-09-28T20:30:00-06:00', 1000),
+      spend('next', '2026-09-29T08:00:00-06:00', 2500),
+    ],
+  });
+  const [b] = await repo.listAccountBalances();
+  assert.equal(b.currentBalance, 97500);
+});
+
+test('re-entering a balance later the same day moves the moment it stands for', async () => {
+  const { crDay } = await import('../src/cr-date.js');
+  const repo = createMemoryRepo({ accounts: [AHORROS] });
+  await repo.saveSnapshot({ accountId: 's-crc', asOf: crDay(new Date()), balance: 50000, currency: 'CRC' });
+  const [b] = await repo.listAccountBalances();
+  assert.ok(b.snapshotCut, 'a recorded moment');
+  assert.ok(Date.parse(b.snapshotCut) <= Date.now() && Date.now() - Date.parse(b.snapshotCut) < 5000);
+});
