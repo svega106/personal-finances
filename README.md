@@ -234,6 +234,19 @@ edited — the write ignores rows whose `ext_id` is already present.
 
 To re-import after fixing a parser, run `resyncLast7Days` in the script.
 
+**A ₡0 email is not a charge.** Uber, for one, checks the card for ₡0 when a
+ride is requested and charges later in an email of its own. The parser skips
+those (`zero-amount`), like any other email that is not a charge.
+
+**One refused charge never blocks the rest.** A batch is saved in one
+statement, so a single row the database refuses used to fail the whole run —
+and the same batch was offered again every 15 minutes, failing every time. On
+2 October a ₡0 Uber check did exactly that for most of a morning. Now, when the
+refusal is about a row (a check, a missing or malformed value), the rows are
+written one at a time: the good ones go in, the bad one is reported as
+`rejected` (the script's log lists it), and the run succeeds. An outage still
+fails the run, so nothing is skipped that a retry would have saved.
+
 
 ## Paying a card, income, and cutoff reminders
 

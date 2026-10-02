@@ -384,6 +384,17 @@ export function parseEmail({ from, subject = '', body = '', html = '' }) {
   for (const c of candidates) {
     try {
       const record = PARSERS[issuer](c.text);
+      // A card check, not a charge. Uber, for one, authorizes ₡0 when a ride
+      // is requested and charges later in an email of its own. Read as a
+      // charge of nothing, it was refused by the database (tx_amount_ck) and
+      // took every other charge in the same sync down with it.
+      if (!(record.amount > 0)) {
+        return {
+          ok: false,
+          reason: 'zero-amount',
+          detail: `${record.merchantRaw || 'unknown merchant'} ••${record.last4 || '????'}: ${record.currency} ${record.amount} — a card check, not a charge`,
+        };
+      }
       record.extId = extId(record);
       record.amountCrc = record.currency === 'CRC' ? record.amount : null; // FX applied by caller
       record.scope = record.issuer === 'bncr' ? 'work' : 'personal';

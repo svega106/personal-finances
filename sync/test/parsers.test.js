@@ -343,3 +343,40 @@ Sep 14, 2026 - 08:03 VISA ************0828 NRO. AUT: 865679 REF: 625714486324 TO
   assert.equal(r.amount, 51.97);
   assert.equal(r.scope, 'work');
 });
+
+/** The two BAC emails of 2 October 2026, 09:04: a ₡0 card check, and the real charge. */
+const bacOct2 = (merchant, city, auth, ref, amount) => ({
+  from: 'NotificacionBAC@baccredomatic.cr',
+  subject: `Notificación de transacción ${merchant} 02-10-2026 - 09:04`,
+  body: `| Comercio: | ${merchant} |
+| Ciudad y país: | ${city} |
+| Fecha: | Oct 2, 2026, 09:04 |
+| MASTER: | ************2207 |
+| Autorización: | ${auth} |
+| Referencia: | ${ref} |
+| Tipo de Transacción: | COMPRA |
+| Monto: | ${amount} |`,
+});
+
+test('a ₡0 card check is not a charge — it is skipped, not stored', () => {
+  // Uber authorizes ₡0 when a ride is requested. Stored as a charge, it was
+  // refused by the database and blocked the sync for every charge after it.
+  const res = parseEmail(bacOct2('Uber', 'Amsterdam, Países Bajos', '427365', '100200003211', 'CRC .00'));
+  assert.equal(res.ok, false);
+  assert.equal(res.reason, 'zero-amount');
+  assert.match(res.detail, /Uber ••2207: CRC 0 — a card check, not a charge/);
+});
+
+test('the real charge next to it parses as usual', () => {
+  const { ok, record: r } = parseEmail(bacOct2('DLC*UBER EATS', 'San Jose, Costa Rica', '961899', '27719325', 'CRC 5,936.00'));
+  assert.equal(ok, true);
+  assert.equal(r.amount, 5936);
+  assert.equal(r.currency, 'CRC');
+  assert.equal(r.last4, '2207');
+  assert.equal(r.merchantRaw, 'DLC*UBER EATS');
+});
+
+test('a zero in dollars is a card check too', () => {
+  const res = parseEmail(bacOct2('APPLE.COM/BILL', 'CUPERTINO, Estados Unidos', '111111', '222222', 'USD 0.00'));
+  assert.equal(res.reason, 'zero-amount');
+});

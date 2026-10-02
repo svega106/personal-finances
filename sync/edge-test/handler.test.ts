@@ -141,5 +141,44 @@ check('the report says what happened',
     && fresh.notified?.removedDevices === 1 && fresh.notified?.errors.length === 1,
   JSON.stringify(fresh.notified));
 
+/* ---- the email of 2 October: a ₡0 card check must not block the sync ---- */
+
+const variant = (merchant: string, auth: string, amount = 'CRC 38,500.00') => ({
+  ...BAC,
+  subject: `Notificación de transacción ${merchant}`,
+  body: BAC.body.replace('AUTO MERCADO HEREDIA', merchant).replace('004411', auth).replace('CRC 38,500.00', amount),
+});
+
+r = await call({
+  method: 'POST', secret: 'topsecret',
+  body: JSON.stringify({ messages: [variant('Uber', '427365', 'CRC .00'), variant('DLC*UBER EATS', '961899', 'CRC 5,936.00')] }),
+});
+const zero = await r.json();
+check('a ₡0 card check is skipped and the real charge beside it imported',
+  r.status === 200 && zero.imported === 1 && zero.skipped.some((x: any) => x.reason === 'zero-amount'),
+  JSON.stringify(zero));
+check('only the real charge reached the database',
+  captured.rows.length === 1 && captured.rows[0].amount === 5936, JSON.stringify(captured.rows.map((x) => x.amount)));
+
+r = await call({
+  method: 'POST', secret: 'topsecret',
+  body: JSON.stringify({ messages: [variant('RECHAZO SA', '555555'), variant('AUTO MERCADO HEREDIA', '666666')] }),
+});
+const refused = await r.json();
+check('a row the database refuses is set aside, and the rest are saved',
+  r.status === 200 && refused.imported === 1 && refused.rejected === 1,
+  JSON.stringify(refused));
+check('and it is reported with the reason, so it can be looked at',
+  refused.skipped.some((x: any) => x.reason === 'rejected' && /tx_test_ck/.test(x.detail) && x.issuer === 'bac'
+    && /RECHAZO SA · CRC 38500/.test(x.sample)),
+  JSON.stringify(refused.skipped));
+
+r = await call({
+  method: 'POST', secret: 'topsecret',
+  body: JSON.stringify({ messages: [variant('CAIDA SA', '777777')] }),
+});
+await r.body?.cancel();
+check('an outage still fails the run, so the sync retries it', r.status === 500, String(r.status));
+
 console.log(failures ? `\n${failures} check(s) FAILED` : '\nall checks passed');
 Deno.exit(failures ? 1 : 0);

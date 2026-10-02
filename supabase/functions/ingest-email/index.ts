@@ -54,6 +54,15 @@ type Incoming = { id?: string; from: string; subject?: string; body?: string; ht
 /** What a notification needs to know about a charge the insert created. */
 const INSERTED_COLS = 'id, kind, status, posted_at, merchant, merchant_raw, amount, currency, account_id, scope, cat';
 
+/**
+ * Postgres codes that mean "this row, as written, will never go in": a check,
+ * a missing or malformed value, a reference to nothing. Retrying the run
+ * cannot fix those, so the row is set aside and the rest are saved. Anything
+ * else — a timeout, an outage — still fails the run, so it is retried whole.
+ */
+const ROW_REJECTED = new Set(['23514', '23502', '23503', '22P02', '22003', '22001', '22007', '22008']);
+const rowRejected = (e: { code?: string } | null) => !!e?.code && ROW_REJECTED.has(e.code);
+
 /** Long enough for a few pushes; short enough that a stuck one never stalls the sync. */
 const NOTIFY_BUDGET_MS = 15_000;
 
@@ -178,6 +187,8 @@ Deno.serve(async (req: Request) => {
   }));
 
   const rows: Record<string, unknown>[] = [];
+  // The message each row came from, to say which one when a row is refused.
+  const rowIds: (string | undefined)[] = [];
   const skipped: Record<string, unknown>[] = [];
 
   for (const m of messages) {
@@ -198,6 +209,7 @@ Deno.serve(async (req: Request) => {
     }
 
     const r = parsed.record;
+    rowIds.push(m.id);
     rows.push(toTransactionRow({
       record: r,
       hit: matchRule(rules, r.merchantRaw, r.mcc),
@@ -228,19 +240,48 @@ Deno.serve(async (req: Request) => {
   }
 
   let imported = 0;
+  let rejected = 0;
   // deno-lint-ignore no-explicit-any
   let inserted: any[] = [];
   if (rows.length) {
     // ignoreDuplicates, NOT a plain upsert. A charge already in the table may
     // have been recategorized or renamed by hand since it arrived; re-running
     // the sync must never overwrite that with the raw email again.
-    const { data, error } = await db
+    const write = (batch: Record<string, unknown>[]) => db
       .from('transactions')
-      .upsert(rows, { onConflict: 'user_id,ext_id', ignoreDuplicates: true })
+      .upsert(batch, { onConflict: 'user_id,ext_id', ignoreDuplicates: true })
       // Only the rows actually inserted come back; duplicates do not.
       .select(INSERTED_COLS);
-    if (error) return json({ error: `insert: ${error.message}` }, 500);
-    inserted = data ?? [];
+
+    const all = await write(rows);
+    if (!all.error) {
+      inserted = all.data ?? [];
+    } else if (!rowRejected(all.error)) {
+      return json({ error: `insert: ${all.error.message}` }, 500);
+    } else {
+      // One row the database will not take must not hold back the rest. A
+      // single ₡0 card check once stopped every sync for hours, because the
+      // whole batch was refused and the same batch was offered again each
+      // time. Written one at a time, the good ones go in and the bad one is
+      // reported — and the run succeeds, so the sync moves past it.
+      for (let i = 0; i < rows.length; i++) {
+        const one = await write([rows[i]]);
+        if (!one.error) {
+          inserted.push(...(one.data ?? []));
+          continue;
+        }
+        if (!rowRejected(one.error)) return json({ error: `insert: ${one.error.message}` }, 500);
+        rejected += 1;
+        const row = rows[i];
+        const entry = {
+          id: rowIds[i], reason: 'rejected', detail: one.error.message,
+          issuer: String(row.ext_id ?? '').split(':')[0] || null,
+          sample: `${row.merchant_raw ?? '?'} · ${row.currency} ${row.amount} · ${row.posted_at}`,
+        };
+        skipped.push(entry);
+        console.warn('[insert] row refused:', JSON.stringify(entry));
+      }
+    }
     imported = inserted.length;
   }
 
@@ -251,7 +292,8 @@ Deno.serve(async (req: Request) => {
     mode,
     received: messages.length,
     imported,
-    duplicates: rows.length - imported,
+    duplicates: rows.length - imported - rejected,
+    rejected,
     skipped,
     unmatchedAccount: rows.filter((r) => r.account_id === null).length,
     notified,

@@ -5,7 +5,9 @@
  * to the function would be picked up when the function is deployed, and the
  * live function would then write to this stub instead of the database.
  */
-export const captured: { rows: any[]; opts: any; removed: string[] } = { rows: [], opts: null, removed: [] };
+export const captured: { rows: any[]; opts: any; removed: string[]; writes: number } = {
+  rows: [], opts: null, removed: [], writes: 0,
+};
 
 const ACCOUNTS = [
   { id: 'bac-visa-crc', user_id: 'u1', label: 'BAC VISA ₡', issuer: 'bac', last4: '4477', default_currency: 'CRC', scope: 'personal', active: true },
@@ -39,6 +41,13 @@ function filtered(rows: any[]) {
   return q;
 }
 
+/** A statement that fails, as PostgREST reports it. */
+function failing(error: { code?: string; message: string }) {
+  const p: any = Promise.resolve({ data: null, error });
+  p.select = () => p;
+  return p;
+}
+
 /** Every builder method returns the same thenable, so any chain order works. */
 function chain(data: any) {
   const p: any = Promise.resolve({ data, error: null });
@@ -66,6 +75,15 @@ export function createClient(_url: string, _key: string, _opts?: unknown) {
         upsert(rows: any[], opts: any) {
           captured.rows = rows;
           captured.opts = opts;
+          captured.writes += 1;
+          // As Postgres does: one row a check refuses fails the whole statement…
+          if (rows.some((r) => String(r.merchant_raw).includes('RECHAZO'))) {
+            return failing({ code: '23514', message: 'new row for relation "transactions" violates check constraint "tx_test_ck"' });
+          }
+          // …and an outage fails it with no Postgres code at all.
+          if (rows.some((r) => String(r.merchant_raw).includes('CAIDA'))) {
+            return failing({ message: 'connection timed out' });
+          }
           // As PostgREST does: the inserted rows come back, with their ids.
           return chain(rows.map((r, i) => ({ id: `new${i}`, ...r })));
         },

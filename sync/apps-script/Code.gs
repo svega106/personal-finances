@@ -217,7 +217,8 @@ function run_(mode, since, advance) {
     }
     changed = changed.concat(r.changed || []);
     failed = failed.concat((r.skipped || []).filter(function (x) {
-      return x.reason === 'parse-error';
+      // Unreadable, or read but refused by the database: either way, not in the app.
+      return x.reason === 'parse-error' || x.reason === 'rejected';
     }));
   }
 
@@ -245,7 +246,7 @@ function run_(mode, since, advance) {
     if (notifyProblem) summary += '\n    notifications not sent: ' + notifyProblem;
   }
   if (failed.length) {
-    summary += '\n*** ' + failed.length + ' COULD NOT BE PARSED — those charges are not in the app:';
+    summary += '\n*** ' + failed.length + ' COULD NOT BE READ OR SAVED — those charges are not in the app:';
     failed.forEach(function (f) {
       summary += '\n    ' + (f.issuer || '?') + ': ' + f.detail
                + '\n      saw: ' + (f.sample || '(no sample)');
